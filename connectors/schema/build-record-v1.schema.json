@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/veerendra-saraswathi/S1.a/schema/build-record-v1.schema.json",
+  "title": "S2 build record, version 1",
+  "description": "What a CI pipeline emits when it finishes a build: the artifact, the requirements it implements, and the runs that exercised it before it left the pipeline. The connector turns one of these into a SoftwareBuild, its implements links, and one TestRun per run with its verdict. Enumerations match the drone-engineering ontology pack; changing one there is a breaking change here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "build"],
+  "properties": {
+    "contract": {
+      "description": "Contract identifier and version. A connector refuses anything it does not know.",
+      "const": "s2.build-record/v1"
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["buildId", "name", "target"],
+      "properties": {
+        "buildId": {"type": "string", "minLength": 1, "description": "Primary key of the SoftwareBuild in S2. The pipeline owns this identifier."},
+        "name": {"type": "string", "minLength": 1},
+        "target": {"enum": ["FLIGHT", "GROUND", "SIMULATION"]},
+        "gitCommit": {"type": "string", "description": "Commit the artifact was built from."},
+        "artifactDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "SHA-256 of the built artifact. The one fact that ties a record to a specific binary."},
+        "builtAt": {"type": "string", "format": "date-time"},
+        "pipelineRun": {"type": "string", "description": "The pipeline run that produced this. Named in the rationale of every action the record causes, so the audit log points back at it."},
+        "implements": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "description": "Requirements this build implements. Each must already exist in S2."
+        }
+      }
+    },
+    "testRuns": {
+      "type": "array",
+      "default": [],
+      "description": "Runs the pipeline itself performed. Every one of them tested this build; the record does not repeat the build id.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["testRunId", "name", "kind", "startedAt", "verdict"],
+        "properties": {
+          "testRunId": {"type": "string", "minLength": 1},
+          "name": {"type": "string", "minLength": 1},
+          "kind": {
+            "enum": ["UNIT", "SITL", "SIMULATION"],
+            "description": "What a pipeline can run. HILS, ACTUATOR_BENCH and FLIGHT runs come from a bench or an aircraft, not from CI, and are reported with s2.bench-report/v1 instead."
+          },
+          "startedAt": {"type": "string", "format": "date-time"},
+          "endedAt": {"type": "string", "format": "date-time"},
+          "verdict": {"enum": ["PASS", "FAIL", "INCONCLUSIVE"]},
+          "verdictNote": {"type": "string"},
+          "logUri": {"type": "string", "description": "Object-store URI of the run's output. Test logs stay in files; only the verdict enters the ontology."},
+          "droneKey": {"type": "string", "description": "Only for a run bound to a specific airframe, such as SITL against one drone's parameters. Must already exist in S2."},
+          "verifies": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true,
+            "description": "Requirements this run verifies. Each must already exist in S2."
+          }
+        }
+      }
+    }
+  }
+}

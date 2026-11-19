@@ -1,0 +1,38 @@
+{
+  "contract": "s2.build-record/v1",
+  "build": {
+    "buildId": "BLD-FC-2026.11.4",
+    "name": "Flight software 2026.11.4",
+    "target": "FLIGHT",
+    "gitCommit": "c41e8a27d9b5",
+    "artifactDigest": "sha256:3b1f4c8e2a7d6950fe13c4b8a05d7e2619f8c3a4b5d6e7f8091a2b3c4d5e6f70",
+    "builtAt": "2026-11-20T04:10:00Z",
+    "pipelineRun": "offline-ci/flight-software/4821",
+    "implements": ["SW-LOC-031"]
+  },
+  "testRuns": [
+    {
+      "testRunId": "TR-UNIT-2026.11.4",
+      "name": "Unit tests, flight software 2026.11.4",
+      "kind": "UNIT",
+      "startedAt": "2026-11-20T04:10:40Z",
+      "endedAt": "2026-11-20T04:13:02Z",
+      "verdict": "PASS",
+      "verdictNote": "412 tests, no failures.",
+      "logUri": "s3://s2-ci-logs/4821/unit/",
+      "verifies": ["SW-LOC-031"]
+    },
+    {
+      "testRunId": "TR-SITL-2026.11.4",
+      "name": "SITL powerline corridor, flight software 2026.11.4",
+      "kind": "SITL",
+      "startedAt": "2026-11-20T04:14:00Z",
+      "endedAt": "2026-11-20T04:38:11Z",
+      "verdict": "PASS",
+      "verdictNote": "Fused position held within 6.2 m of ground truth, published at 10 Hz throughout.",
+      "logUri": "s3://s2-ci-logs/4821/sitl/",
+      "droneKey": "DRN-0001",
+      "verifies": ["SW-LOC-031"]
+    }
+  ]
+}

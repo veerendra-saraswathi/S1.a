@@ -1,12 +1,13 @@
 [project]
-name = "s2-hils-connector"
+name = "s2-connectors"
 version = "0.1.0"
-description = "Writes HILS bench run reports into Samanvaya 2 as governed engineering events."
+description = "Writes a drone company's engineering events into Samanvaya 2."
 requires-python = ">=3.10"
 dependencies = ["httpx>=0.27", "jsonschema>=4.21"]
 
 [project.scripts]
-hils-submit = "s2_hils.__main__:main"
+hils-submit = "s2_connectors.cli:hils"
+build-submit = "s2_connectors.cli:build_"
 
 [dependency-groups]
 dev = ["pytest>=8"]
@@ -16,7 +17,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/s2_hils"]
+packages = ["src/s2_connectors"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

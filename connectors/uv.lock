@@ -466,7 +466,7 @@ wheels = [
 ]
 
 [[package]]
-name = "s2-hils-connector"
+name = "s2-connectors"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

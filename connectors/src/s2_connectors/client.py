@@ -91,10 +91,13 @@ class S2Client:
         path: str,
         body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         headers = {"Authorization": f"Bearer {self.token(user)}"}
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
+        if extra_headers:
+            headers.update(extra_headers)
         try:
             return self._http.request(method, path, json=body, headers=headers)
         except httpx.TransportError as exc:

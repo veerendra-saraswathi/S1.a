@@ -30,9 +30,9 @@ flowchart TB
     end
     subgraph S1a["S1.a"]
         GW[mavlink-gateway]
-        HC[hils-connector]
+        HC[bench connector]
         CC[can-gateway, planned]
-        BC[build-provenance connector, planned]
+        BC[build connector]
         PACK[drone-engineering pack]
         SEED[seed-chain]
     end
@@ -50,7 +50,7 @@ flowchart TB
     GW -- MQTT, contract v1 --> MQ --> K --> TSDB
     M2 -.-> HC --> ENG
     M6 -.-> CC -.-> MQ
-    M34 -.-> BC -.-> ENG
+    M34 -.-> BC --> ENG
     PACK -- apply --> ENG
     SEED -- REST --> ENG
     ENG --> PG
@@ -163,8 +163,10 @@ S2's baseline policy applies to all of them: requesting needs the `operator` rol
 
 1. Source-timestamped telemetry for bench use: PTP clock, per-signal rates above 1 Hz.
 2. CAN gateway for bench buses.
-3. Build-provenance connector from the offline CI pipeline.
-4. Orchestrated build gate: simulation pass, bench pass, flight clearance.
+3. Orchestrated build gate: simulation pass, bench pass, flight clearance. This needs an
+   action in the pack first: `SoftwareBuild.status` can reach `CLEARED_FOR_FLIGHT` and
+   `REJECTED` through actions and `BUILT` from a build record, but nothing advances a
+   build to `SIM_PASSED` or `BENCH_PASSED` when a run passes.
 
-The HILS connector is built; see its [README](../connectors/hils-connector/README.md).
-What it still waits on is a bench to write the reports it reads.
+The bench and build connectors are built; see their [README](../connectors/README.md).
+What they wait on is a bench and a pipeline to write the documents they read.

@@ -16,30 +16,32 @@ GATEWAY_DIR := gateways/mavlink-gateway
 BIN         := bin/mavlink-gateway
 GOLDEN      := $(GATEWAY_DIR)/internal/mavlink/testdata/golden.txt
 SIM         := tools/mavlink-sim/sim.py
-HILS        := connectors/hils-connector
+CONNECTORS  := connectors
 SEED        := tools/seed-chain/seed.py
 
 # Override on the command line, e.g. make sim DRONES=5
 VEHICLES ?= 1=DRN-0001,2=DRN-0002,3=DRN-0003
 DRONES   ?= 3
 RATE_HZ  ?= 1
-REPORT   ?= $(HILS)/examples/TR-HILS-0058.json
+REPORT   ?= $(CONNECTORS)/examples/TR-HILS-0058.json
+RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-gateway test-connector build run run-dry sim seed seed-dry submit submit-dry golden lint fmt clean
+.PHONY: help test test-gateway test-connectors build run run-dry sim seed seed-dry \
+        submit-bench submit-bench-dry submit-build submit-build-dry golden lint fmt clean
 
 help:  ## list the targets
 	@grep -hE '^[a-z][a-z-]*:.*##' $(MAKEFILE_LIST) \
 		| sed -e 's/:[^#]*## /|/' \
 		| awk -F'|' '{printf "  %-15s %s\n", $$1, $$2}'
 
-test: test-gateway test-connector  ## run every test
+test: test-gateway test-connectors  ## run every test
 
 test-gateway:  ## the gateway's parser and mapping tests
 	cd $(GATEWAY_DIR) && go test ./...
 
-test-connector:  ## the hils-connector's report and submission tests
-	cd $(HILS) && uv run --quiet pytest -q
+test-connectors:  ## the connectors' contract and mapping tests
+	cd $(CONNECTORS) && uv run --quiet pytest -q
 
 build:  ## compile the gateway to bin/mavlink-gateway
 	@mkdir -p bin
@@ -60,11 +62,17 @@ seed:  ## apply the ontology pack and load the worked example into S2
 seed-dry:  ## print the seed requests without sending them
 	uv run $(SEED) --dry-run
 
-submit:  ## submit a bench report to S2 (REPORT=path/to/report.json)
-	uv run --project $(HILS) hils-submit $(REPORT)
+submit-bench:  ## write a bench report into S2 (REPORT=path/to/report.json)
+	uv run --project $(CONNECTORS) hils-submit $(REPORT)
 
-submit-dry:  ## print the calls a bench report becomes, send nothing
-	uv run --project $(HILS) hils-submit $(REPORT) --dry-run
+submit-bench-dry:  ## print the calls a bench report becomes, send nothing
+	uv run --project $(CONNECTORS) hils-submit $(REPORT) --dry-run
+
+submit-build:  ## write a CI build record into S2 (RECORD=path/to/record.json)
+	uv run --project $(CONNECTORS) build-submit $(RECORD)
+
+submit-build-dry:  ## print the calls a build record becomes, send nothing
+	uv run --project $(CONNECTORS) build-submit $(RECORD) --dry-run
 
 golden:  ## regenerate the golden frames (overwrites the test fixture)
 	uv run tools/mavlink-sim/gen_golden.py > $(GOLDEN)
@@ -72,7 +80,7 @@ golden:  ## regenerate the golden frames (overwrites the test fixture)
 lint:  ## vet the Go code and lint the Python
 	cd $(GATEWAY_DIR) && go vet ./...
 	uvx ruff check tools
-	cd $(HILS) && uvx ruff check .
+	cd $(CONNECTORS) && uvx ruff check .
 
 fmt:  ## gofmt the gateway
 	cd $(GATEWAY_DIR) && gofmt -w .

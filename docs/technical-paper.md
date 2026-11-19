@@ -28,7 +28,7 @@ Two consequences follow. Traceability, which aviation software assurance process
 
 ## 3. Architecture
 
-S1.a has three kinds of component: gateways that convert a field protocol into S2's telemetry contract, connectors that write engineering events through S2's API, and an ontology pack that defines the model. One gateway (MAVLink), one connector (HILS bench reports), the pack, and a seeding tool exist today. The [architecture document](architecture.md) gives the component and data-flow diagrams.
+S1.a has three kinds of component: gateways that convert a field protocol into S2's telemetry contract, connectors that write engineering events through S2's API, and an ontology pack that defines the model. One gateway (MAVLink), two connectors (bench reports and CI build records), the pack, and a seeding tool exist today. The [architecture document](architecture.md) gives the component and data-flow diagrams.
 
 Latency separates the system into three loops. Hard real-time loops (milliseconds) stay on the aircraft computer and the bench PC. The soft real-time loop (hundreds of milliseconds to seconds) carries telemetry over MQTT and Kafka into a time-series store. The engineering loop (minutes to weeks) lives in the ontology. Only the last two touch S1.a and S2.
 
@@ -95,11 +95,16 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 2. **Contract stability.** S2 describes its telemetry contract as a placeholder. The gateway's mapping layer isolates the dependency, but the contract will change.
 3. **Schema coverage.** Module 1 datasets, Module 5 scenarios and GIS terrain are not yet modelled.
 4. **Authentication at the edge.** MAVLink signatures are not verified and the broker in S2's local stack has no access control.
-5. **Open source and proprietary assets.** The integration layer and the generic model can be public. Flight software, customer telemetry and trained models cannot. The boundary between a public pack and a private, airframe-specific overlay is not yet defined.
+5. **The build gate is not expressible yet.** `SoftwareBuild` has five states, and
+   actions govern only two of them. A build reaches `BUILT` from a pipeline record, and
+   `CLEARED_FOR_FLIGHT` or `REJECTED` through an approval, but nothing moves it to
+   `SIM_PASSED` or `BENCH_PASSED` when a simulation or bench run passes. Until an action
+   does, the middle of the gate can only be written directly, which defeats the point.
+6. **Open source and proprietary assets.** The integration layer and the generic model can be public. Flight software, customer telemetry and trained models cannot. The boundary between a public pack and a private, airframe-specific overlay is not yet defined.
 
 ## 8. Roadmap
 
-Next, in order: add source-timestamped, higher-rate telemetry for bench use; add CAN; then orchestrate the build gate as a durable workflow that advances a build from simulation to bench to an approval request.
+Next, in order: add an action that advances a build when a run passes; add source-timestamped, higher-rate telemetry for bench use; add CAN; then orchestrate the build gate as a durable workflow that advances a build from simulation to bench to an approval request.
 
 ## References
 
