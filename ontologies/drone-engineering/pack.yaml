@@ -1,0 +1,380 @@
+# Drone engineering ontology: the traceability chain a drone company has to keep.
+#
+#   Requirement -> EngineeringDocument -> SoftwareBuild -> TestRun -> Anomaly -> Subsystem
+#
+# It models the engineering side of Project Samanvaya (Modules 1-6): what was required,
+# what was built, how it was tested on simulation and bench, and what went wrong.
+# Vehicles, missions and work orders come from S2's core-fleet pack.
+#
+# This is an S2 ontology pack. Apply it to a running S2 ontology engine:
+#   s2ctl apply-pack ontologies/drone-engineering/pack.yaml     (needs the ontology-admin role)
+
+name: drone-engineering
+version: 0.1.0
+description: Requirements, documents, builds, test runs and anomalies for drone engineering.
+requires: [core-fleet]
+
+object_types:
+  - api_name: Subsystem
+    display_name: Subsystem
+    description: A drone subsystem that a fault can be attributed to.
+    ui: {icon: chip, color: "#5F5E5A"}
+    properties:
+      - {api_name: subsystemId, display_name: Subsystem ID, data_type: string, is_primary_key: true}
+      - {api_name: name, display_name: Name, data_type: string, is_title: true, is_required: true}
+      - api_name: kind
+        display_name: Kind
+        data_type: string
+        is_required: true
+        constraints:
+          enum: [FLIGHT_CONTROLLER, PROPULSION, POWER, NAVIGATION, PAYLOAD, ACTUATOR, COMMS, AIRFRAME]
+      - {api_name: partNumber, display_name: Part number, data_type: string}
+
+  - api_name: Requirement
+    display_name: Requirement
+    description: One requirement at system, interface or software level.
+    ui: {icon: list-check, color: "#185FA5"}
+    properties:
+      - {api_name: requirementId, display_name: Requirement ID, data_type: string, is_primary_key: true}
+      - {api_name: title, display_name: Title, data_type: string, is_title: true, is_required: true}
+      - api_name: level
+        display_name: Level
+        data_type: string
+        is_required: true
+        constraints: {enum: [SYSTEM, INTERFACE, SOFTWARE]}
+      - {api_name: statement, display_name: Statement, data_type: string}
+      - api_name: status
+        display_name: Status
+        data_type: string
+        is_required: true
+        constraints: {enum: [DRAFT, APPROVED, SUPERSEDED]}
+      - api_name: verificationMethod
+        display_name: Verification method
+        data_type: string
+        constraints: {enum: [TEST, ANALYSIS, INSPECTION, DEMONSTRATION]}
+
+  - api_name: EngineeringDocument
+    display_name: Engineering document
+    description: An SDLC document, written by a person or drafted by the documentation pipeline.
+    ui: {icon: file-text, color: "#854F0B"}
+    properties:
+      - {api_name: documentId, display_name: Document ID, data_type: string, is_primary_key: true}
+      - {api_name: title, display_name: Title, data_type: string, is_title: true, is_required: true}
+      - api_name: kind
+        display_name: Kind
+        data_type: string
+        is_required: true
+        constraints: {enum: [SYSRS, IRS, MOM, SRS, SDD, ICD, STP, STR]}
+      - {api_name: revision, display_name: Revision, data_type: string}
+      - api_name: status
+        display_name: Status
+        data_type: string
+        is_required: true
+        constraints: {enum: [DRAFT, IN_REVIEW, BASELINED, SUPERSEDED]}
+      - api_name: author
+        display_name: Authored by
+        data_type: string
+        constraints: {enum: [HUMAN, AGENT]}
+      - api_name: gitRef
+        display_name: Git reference
+        description: Repository path and commit of the document source.
+        data_type: string
+      - {api_name: baselineNote, display_name: Baseline note, data_type: string}
+
+  - api_name: SoftwareBuild
+    display_name: Software build
+    description: One compiled flight, ground or simulation software artifact.
+    ui: {icon: package, color: "#534AB7"}
+    properties:
+      - {api_name: buildId, display_name: Build ID, data_type: string, is_primary_key: true}
+      - {api_name: name, display_name: Name, data_type: string, is_title: true, is_required: true}
+      - api_name: target
+        display_name: Target
+        data_type: string
+        is_required: true
+        constraints: {enum: [FLIGHT, GROUND, SIMULATION]}
+      - {api_name: gitCommit, display_name: Git commit, data_type: string}
+      - api_name: artifactDigest
+        display_name: Artifact digest
+        description: SHA-256 of the built artifact, as recorded by the CI pipeline.
+        data_type: string
+      - {api_name: builtAt, display_name: Built at, data_type: timestamp}
+      - api_name: status
+        display_name: Status
+        data_type: string
+        is_required: true
+        constraints: {enum: [BUILT, SIM_PASSED, BENCH_PASSED, CLEARED_FOR_FLIGHT, REJECTED]}
+      - {api_name: statusNote, display_name: Status note, data_type: string}
+
+  - api_name: TestRun
+    display_name: Test run
+    description: One execution of tests, from unit level to a flight trial.
+    ui: {icon: flask, color: "#0F6E56"}
+    properties:
+      - {api_name: testRunId, display_name: Test run ID, data_type: string, is_primary_key: true}
+      - {api_name: name, display_name: Name, data_type: string, is_title: true, is_required: true}
+      - api_name: kind
+        display_name: Kind
+        data_type: string
+        is_required: true
+        constraints: {enum: [UNIT, SITL, SIMULATION, HILS, ACTUATOR_BENCH, FLIGHT]}
+      - api_name: status
+        display_name: Status
+        data_type: string
+        is_required: true
+        constraints: {enum: [SCHEDULED, RUNNING, COMPLETED, ABORTED]}
+      - api_name: verdict
+        display_name: Verdict
+        data_type: string
+        constraints: {enum: [PASS, FAIL, INCONCLUSIVE]}
+      - {api_name: bench, display_name: Bench or rig, data_type: string}
+      - {api_name: startedAt, display_name: Started at, data_type: timestamp}
+      - {api_name: endedAt, display_name: Ended at, data_type: timestamp}
+      - api_name: logUri
+        display_name: Log location
+        description: Object-store URI of the run's raw logs.
+        data_type: string
+      - {api_name: verdictNote, display_name: Verdict note, data_type: string}
+
+  - api_name: Anomaly
+    display_name: Anomaly
+    description: Something a detector or an operator flagged during a test run.
+    ui: {icon: alert-triangle, color: "#A32D2D"}
+    properties:
+      - {api_name: anomalyId, display_name: Anomaly ID, data_type: string, is_primary_key: true}
+      - {api_name: title, display_name: Title, data_type: string, is_title: true, is_required: true}
+      - api_name: severity
+        display_name: Severity
+        data_type: string
+        is_required: true
+        constraints: {enum: [INFO, WARNING, CRITICAL]}
+      - api_name: detector
+        display_name: Detected by
+        data_type: string
+        constraints: {enum: [HILS_MODEL, VISUAL_TWIN, OPERATOR]}
+      - api_name: faultClass
+        display_name: Fault class
+        data_type: string
+        constraints:
+          enum: [REDUCED_GAIN, BINDING, FREQUENCY_SHIFT, INCREASED_DAMPING, TIMING_DRIFT, OTHER]
+      - {api_name: detectedAt, display_name: Detected at, data_type: timestamp}
+      - {api_name: durationS, display_name: Duration, data_type: double, unit: s, constraints: {minimum: 0}}
+      - api_name: status
+        display_name: Status
+        data_type: string
+        is_required: true
+        constraints: {enum: [OPEN, CONFIRMED, DISMISSED, RESOLVED]}
+      - {api_name: rootCause, display_name: Root cause, data_type: string}
+
+link_types:
+  - api_name: installedOn
+    display_name: installed on
+    reverse_api_name: subsystems
+    reverse_display_name: subsystems
+    source_object_type: Subsystem
+    target_object_type: CommercialDrone
+    cardinality: many_to_one
+
+  - api_name: derivedFrom
+    display_name: derived from
+    reverse_api_name: derivedRequirements
+    reverse_display_name: derived requirements
+    source_object_type: Requirement
+    target_object_type: Requirement
+    cardinality: many_to_many
+
+  - api_name: specifiedIn
+    display_name: specified in
+    reverse_api_name: requirements
+    reverse_display_name: requirements
+    source_object_type: Requirement
+    target_object_type: EngineeringDocument
+    cardinality: many_to_one
+
+  - api_name: implements
+    display_name: implements
+    reverse_api_name: implementedBy
+    reverse_display_name: implemented by
+    source_object_type: SoftwareBuild
+    target_object_type: Requirement
+    cardinality: many_to_many
+
+  - api_name: verifies
+    display_name: verifies
+    reverse_api_name: verifiedBy
+    reverse_display_name: verified by
+    source_object_type: TestRun
+    target_object_type: Requirement
+    cardinality: many_to_many
+
+  - api_name: testsBuild
+    display_name: tests build
+    reverse_api_name: testRuns
+    reverse_display_name: test runs
+    source_object_type: TestRun
+    target_object_type: SoftwareBuild
+    cardinality: many_to_one
+
+  - api_name: ranOn
+    display_name: ran on
+    reverse_api_name: testRuns
+    reverse_display_name: test runs
+    source_object_type: TestRun
+    target_object_type: CommercialDrone
+    cardinality: many_to_one
+
+  - api_name: foundIn
+    display_name: found in
+    reverse_api_name: anomalies
+    reverse_display_name: anomalies
+    source_object_type: Anomaly
+    target_object_type: TestRun
+    cardinality: many_to_one
+
+  - api_name: attributedTo
+    display_name: attributed to
+    reverse_api_name: anomalies
+    reverse_display_name: anomalies
+    source_object_type: Anomaly
+    target_object_type: Subsystem
+    cardinality: many_to_one
+
+action_types:
+  - api_name: recordTestVerdict
+    display_name: Record test verdict
+    description: Close a test run with its pass/fail verdict.
+    target_object_type: TestRun
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [testRunId, verdict]
+      properties:
+        testRunId: {type: string, minLength: 1}
+        verdict: {enum: [PASS, FAIL, INCONCLUSIVE]}
+        note: {type: string}
+    edits:
+      - op: modify_object
+        object_type: TestRun
+        target: "{{ params.testRunId }}"
+        assign:
+          status: COMPLETED
+          verdict: "{{ params.verdict }}"
+          verdictNote: "{{ params.note }}"
+
+  - api_name: raiseAnomaly
+    display_name: Raise anomaly
+    description: Record an anomaly against the test run it was seen in.
+    target_object_type: Anomaly
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [anomalyId, testRunId, title, severity]
+      properties:
+        anomalyId: {type: string, minLength: 1}
+        testRunId: {type: string, minLength: 1}
+        title: {type: string, minLength: 3}
+        severity: {enum: [INFO, WARNING, CRITICAL]}
+        detector: {enum: [HILS_MODEL, VISUAL_TWIN, OPERATOR]}
+        faultClass: {enum: [REDUCED_GAIN, BINDING, FREQUENCY_SHIFT, INCREASED_DAMPING, TIMING_DRIFT, OTHER]}
+    edits:
+      - op: create_object
+        object_type: Anomaly
+        target: "{{ params.anomalyId }}"
+        assign:
+          title: "{{ params.title }}"
+          severity: "{{ params.severity }}"
+          detector: "{{ params.detector }}"
+          faultClass: "{{ params.faultClass }}"
+          status: OPEN
+      - op: create_link
+        object_type: Anomaly
+        target: "{{ params.anomalyId }}"
+        link_type: foundIn
+        link_target: "{{ params.testRunId }}"
+
+  - api_name: attributeAnomaly
+    display_name: Attribute anomaly
+    description: Confirm an anomaly and name the subsystem and root cause.
+    target_object_type: Anomaly
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [anomalyId, subsystemId, rootCause]
+      properties:
+        anomalyId: {type: string, minLength: 1}
+        subsystemId: {type: string, minLength: 1}
+        rootCause: {type: string, minLength: 5}
+    edits:
+      - op: modify_object
+        object_type: Anomaly
+        target: "{{ params.anomalyId }}"
+        assign:
+          status: CONFIRMED
+          rootCause: "{{ params.rootCause }}"
+      - op: create_link
+        object_type: Anomaly
+        target: "{{ params.anomalyId }}"
+        link_type: attributedTo
+        link_target: "{{ params.subsystemId }}"
+
+  - api_name: baselineDocument
+    display_name: Baseline document
+    description: Approve a document revision as the baseline. An agent may propose it; a person approves.
+    target_object_type: EngineeringDocument
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [documentId, revision]
+      properties:
+        documentId: {type: string, minLength: 1}
+        revision: {type: string, minLength: 1}
+        note: {type: string}
+    edits:
+      - op: modify_object
+        object_type: EngineeringDocument
+        target: "{{ params.documentId }}"
+        assign:
+          status: BASELINED
+          revision: "{{ params.revision }}"
+          baselineNote: "{{ params.note }}"
+    requires_approval: true
+    agent_access: propose
+
+  - api_name: clearBuildForFlight
+    display_name: Clear build for flight
+    description: Release a build to fly. Needs a second person to approve, and agents cannot propose it.
+    target_object_type: SoftwareBuild
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [buildId, justification]
+      properties:
+        buildId: {type: string, minLength: 1}
+        justification: {type: string, minLength: 10}
+    edits:
+      - op: modify_object
+        object_type: SoftwareBuild
+        target: "{{ params.buildId }}"
+        assign:
+          status: CLEARED_FOR_FLIGHT
+          statusNote: "{{ params.justification }}"
+    requires_approval: true
+
+  - api_name: rejectBuild
+    display_name: Reject build
+    description: Mark a build as not to be used.
+    target_object_type: SoftwareBuild
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [buildId, reason]
+      properties:
+        buildId: {type: string, minLength: 1}
+        reason: {type: string, minLength: 5}
+    edits:
+      - op: modify_object
+        object_type: SoftwareBuild
+        target: "{{ params.buildId }}"
+        assign:
+          status: REJECTED
+          statusNote: "{{ params.reason }}"

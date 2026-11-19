@@ -1,0 +1,14 @@
+# build output
+bin/
+*.test
+*.out
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# editors and OS
+.idea/
+.vscode/
+.DS_Store
