@@ -58,7 +58,7 @@ This is an early increment. The table says exactly what works today.
 | Drone engineering ontology | `ontologies/drone-engineering` | Applied to a live S2 engine: 6 object types, 9 link types and 6 actions registered. |
 | Worked example | `tools/seed-chain` | Runs end to end against a live engine, and is safe to re-run. |
 | MAVLink simulator | `tools/mavlink-sim` | Built. |
-| HILS connector | `connectors/hils-connector` | Built. Bench report contract v1, 28 tests against a stubbed engine. Not yet run against a live engine. |
+| HILS connector | `connectors/hils-connector` | Built. Bench report contract v1, 28 tests, and a report written into a live engine end to end. |
 | CAN, simulator and build connectors | | Planned. |
 | Workflow orchestration of the build gate | | Planned. |
 
