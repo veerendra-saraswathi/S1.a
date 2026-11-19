@@ -28,7 +28,7 @@ Two consequences follow. Traceability, which aviation software assurance process
 
 ## 3. Architecture
 
-S1.a has three kinds of component: gateways that convert a field protocol into S2's telemetry contract, connectors that write engineering events through S2's API, and an ontology pack that defines the model. One gateway (MAVLink), the pack, and a seeding tool exist today. The [architecture document](architecture.md) gives the component and data-flow diagrams.
+S1.a has three kinds of component: gateways that convert a field protocol into S2's telemetry contract, connectors that write engineering events through S2's API, and an ontology pack that defines the model. One gateway (MAVLink), one connector (HILS bench reports), the pack, and a seeding tool exist today. The [architecture document](architecture.md) gives the component and data-flow diagrams.
 
 Latency separates the system into three loops. Hard real-time loops (milliseconds) stay on the aircraft computer and the bench PC. The soft real-time loop (hundreds of milliseconds to seconds) carries telemetry over MQTT and Kafka into a time-series store. The engineering loop (minutes to weeks) lives in the ontology. Only the last two touch S1.a and S2.
 
@@ -98,7 +98,7 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 
 ## 8. Roadmap
 
-Next, in order: build the HILS connector so that M2 verdicts and anomalies arrive as actions; add source-timestamped, higher-rate telemetry for bench use; add CAN; then orchestrate the build gate as a durable workflow that advances a build from simulation to bench to an approval request.
+Next, in order: add source-timestamped, higher-rate telemetry for bench use; add CAN; then orchestrate the build gate as a durable workflow that advances a build from simulation to bench to an approval request.
 
 ## References
 

@@ -10,7 +10,7 @@
 #   s2ctl apply-pack ontologies/drone-engineering/pack.yaml     (needs the ontology-admin role)
 
 name: drone-engineering
-version: 0.1.0
+version: 0.2.0
 description: Requirements, documents, builds, test runs and anomalies for drone engineering.
 requires: [core-fleet]
 
@@ -276,6 +276,10 @@ action_types:
         severity: {enum: [INFO, WARNING, CRITICAL]}
         detector: {enum: [HILS_MODEL, VISUAL_TWIN, OPERATOR]}
         faultClass: {enum: [REDUCED_GAIN, BINDING, FREQUENCY_SHIFT, INCREASED_DAMPING, TIMING_DRIFT, OTHER]}
+        # The window the detector flagged. A bench knows both; without them an anomaly
+        # cannot be lined up against the run's logs or against another subsystem's signals.
+        detectedAt: {type: string, format: date-time}
+        durationS: {type: number, minimum: 0}
     edits:
       - op: create_object
         object_type: Anomaly
@@ -285,6 +289,8 @@ action_types:
           severity: "{{ params.severity }}"
           detector: "{{ params.detector }}"
           faultClass: "{{ params.faultClass }}"
+          detectedAt: "{{ params.detectedAt }}"
+          durationS: "{{ params.durationS }}"
           status: OPEN
       - op: create_link
         object_type: Anomaly

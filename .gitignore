@@ -12,3 +12,7 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+
+# uv project caches inside connectors
+.pytest_cache/
+*.egg-info/

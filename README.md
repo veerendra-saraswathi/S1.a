@@ -58,7 +58,8 @@ This is an early increment. The table says exactly what works today.
 | Drone engineering ontology | `ontologies/drone-engineering` | Applied to a live S2 engine: 6 object types, 9 link types and 6 actions registered. |
 | Worked example | `tools/seed-chain` | Runs end to end against a live engine, and is safe to re-run. |
 | MAVLink simulator | `tools/mavlink-sim` | Built. |
-| HILS, CAN, simulator and build connectors | | Planned. |
+| HILS connector | `connectors/hils-connector` | Built. Bench report contract v1, 28 tests against a stubbed engine. Not yet run against a live engine. |
+| CAN, simulator and build connectors | | Planned. |
 | Workflow orchestration of the build gate | | Planned. |
 
 ## Quick start
@@ -76,6 +77,7 @@ With an S2 stack running locally and seeded (`make up` and `make seed` in the S2
 ```bash
 make run         # publish telemetry for DRN-0001..3 to the S2 broker
 make seed        # apply the ontology pack and load the worked example
+make submit      # write a HILS bench run into S2 from a bench report
 ```
 
 Stop S2's own telemetry simulator first, or both will write to the same drones. Gateway flags, published metrics and known limits are in the [gateway README](gateways/mavlink-gateway/README.md).
@@ -87,6 +89,7 @@ Stop S2's own telemetry simulator first, or both will write to the same drones. 
 | [Architecture](docs/architecture.md) | Components, data flows, the ontology, and what runs where |
 | [Technical paper](docs/technical-paper.md) | The design argument: why the system is shaped this way, how it was verified, what is open |
 | [Tech stack](docs/tech-stack.md) | Every technology in use or planned, and why it was chosen |
+| [HILS connector](connectors/hils-connector/README.md) | The bench report contract, what a report becomes in S2, and the connector's limits |
 
 ## Background
 

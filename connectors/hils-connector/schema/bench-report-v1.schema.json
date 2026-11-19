@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/veerendra-saraswathi/S1.a/schema/bench-report-v1.schema.json",
+  "title": "S2 bench report, version 1",
+  "description": "What a hardware-in-the-loop or actuator bench emits when a run finishes. The connector turns one of these into objects, links and governed actions in S2. Enumerations match the drone-engineering ontology pack; changing one there is a breaking change here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "run"],
+  "properties": {
+    "contract": {
+      "description": "Contract identifier and version. A connector refuses anything it does not know.",
+      "const": "s2.bench-report/v1"
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["testRunId", "name", "kind", "startedAt", "verdict"],
+      "properties": {
+        "testRunId": {"type": "string", "minLength": 1, "description": "Primary key of the TestRun in S2. The bench owns this identifier."},
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["UNIT", "SITL", "SIMULATION", "HILS", "ACTUATOR_BENCH", "FLIGHT"]},
+        "bench": {"type": "string", "description": "Which bench or rig ran it."},
+        "startedAt": {"type": "string", "format": "date-time"},
+        "endedAt": {"type": "string", "format": "date-time"},
+        "verdict": {"enum": ["PASS", "FAIL", "INCONCLUSIVE"]},
+        "verdictNote": {"type": "string"},
+        "logUri": {"type": "string", "description": "Object-store URI of the raw logs. High-rate signals stay in files; only the verdict and the anomalies enter the ontology."},
+        "buildId": {"type": "string", "description": "The SoftwareBuild under test. Must already exist in S2."},
+        "droneKey": {"type": "string", "description": "The CommercialDrone the run executed on. Must already exist in S2."},
+        "verifies": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "description": "Requirements this run verifies. Each must already exist in S2."
+        }
+      }
+    },
+    "anomalies": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["anomalyId", "title", "severity"],
+        "properties": {
+          "anomalyId": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 3},
+          "severity": {"enum": ["INFO", "WARNING", "CRITICAL"]},
+          "detector": {"enum": ["HILS_MODEL", "VISUAL_TWIN", "OPERATOR"]},
+          "faultClass": {"enum": ["REDUCED_GAIN", "BINDING", "FREQUENCY_SHIFT", "INCREASED_DAMPING", "TIMING_DRIFT", "OTHER"]},
+          "detectedAt": {"type": "string", "format": "date-time", "description": "Start of the flagged window."},
+          "durationS": {"type": "number", "minimum": 0, "description": "Length of the flagged window, in seconds."},
+          "subsystemId": {"type": "string", "description": "Subsystem the fault is attributed to. Supply it with rootCause to have the connector confirm the anomaly; omit both to leave it OPEN for a person."},
+          "rootCause": {"type": "string", "minLength": 5}
+        },
+        "dependentRequired": {
+          "subsystemId": ["rootCause"],
+          "rootCause": ["subsystemId"]
+        }
+      }
+    }
+  }
+}

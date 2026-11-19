@@ -1,0 +1,39 @@
+{
+  "contract": "s2.bench-report/v1",
+  "run": {
+    "testRunId": "TR-HILS-0058",
+    "name": "HILS endurance re-run, build 2026.11.3",
+    "kind": "HILS",
+    "bench": "HILS bench 2",
+    "startedAt": "2026-11-19T18:40:00Z",
+    "endedAt": "2026-11-19T19:52:00Z",
+    "verdict": "FAIL",
+    "verdictNote": "Gimbal pitch regression reproduced, and a new timing drift on the navigation bus.",
+    "logUri": "s3://s2-bench-logs/TR-HILS-0058/",
+    "buildId": "BLD-FC-2026.11.3",
+    "droneKey": "DRN-0001",
+    "verifies": ["SYS-NAV-012"]
+  },
+  "anomalies": [
+    {
+      "anomalyId": "ANM-0058-01",
+      "title": "Gimbal pitch step response slower than the twin predicts",
+      "severity": "WARNING",
+      "detector": "HILS_MODEL",
+      "faultClass": "INCREASED_DAMPING",
+      "detectedAt": "2026-11-19T19:02:18Z",
+      "durationS": 6.6,
+      "subsystemId": "SUB-DRN1-GIMBAL",
+      "rootCause": "Pitch-axis bearing contamination reproduced from TR-HILS-0057; damping ratio up about 40 percent against baseline."
+    },
+    {
+      "anomalyId": "ANM-0058-02",
+      "title": "Navigation bus timestamps drift against the bench clock",
+      "severity": "CRITICAL",
+      "detector": "HILS_MODEL",
+      "faultClass": "TIMING_DRIFT",
+      "detectedAt": "2026-11-19T19:31:04Z",
+      "durationS": 128.0
+    }
+  ]
+}

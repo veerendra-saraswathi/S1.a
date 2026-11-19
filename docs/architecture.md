@@ -30,7 +30,7 @@ flowchart TB
     end
     subgraph S1a["S1.a"]
         GW[mavlink-gateway]
-        HC[hils-connector, planned]
+        HC[hils-connector]
         CC[can-gateway, planned]
         BC[build-provenance connector, planned]
         PACK[drone-engineering pack]
@@ -48,7 +48,7 @@ flowchart TB
     M1 -- MAVLink UDP --> GW
     M5 -- MAVLink UDP --> GW
     GW -- MQTT, contract v1 --> MQ --> K --> TSDB
-    M2 -.-> HC -.-> ENG
+    M2 -.-> HC --> ENG
     M6 -.-> CC -.-> MQ
     M34 -.-> BC -.-> ENG
     PACK -- apply --> ENG
@@ -161,8 +161,10 @@ S2's baseline policy applies to all of them: requesting needs the `operator` rol
 
 ## 9. Planned work
 
-1. HILS connector: bench run metadata, verdicts and anomaly windows into `TestRun` and `Anomaly`.
-2. Source-timestamped telemetry for bench use: PTP clock, per-signal rates above 1 Hz.
-3. CAN gateway for bench buses.
-4. Build-provenance connector from the offline CI pipeline.
-5. Orchestrated build gate: simulation pass, bench pass, flight clearance.
+1. Source-timestamped telemetry for bench use: PTP clock, per-signal rates above 1 Hz.
+2. CAN gateway for bench buses.
+3. Build-provenance connector from the offline CI pipeline.
+4. Orchestrated build gate: simulation pass, bench pass, flight clearance.
+
+The HILS connector is built; see its [README](../connectors/hils-connector/README.md).
+What it still waits on is a bench to write the reports it reads.
