@@ -55,8 +55,8 @@ This is an early increment. The table says exactly what works today.
 | Component | Path | State |
 |---|---|---|
 | MAVLink gateway | `gateways/mavlink-gateway` | Built. Parser tested against pymavlink; output validated against S2's contract code; MQTT tested against a broker, including reconnect. |
-| Drone engineering ontology | `ontologies/drone-engineering` | Written and checked against S2's schema. Not yet applied to a live engine. |
-| Worked example | `tools/seed-chain` | Written and checked against S2's routes and models. Not yet run against a live engine. |
+| Drone engineering ontology | `ontologies/drone-engineering` | Applied to a live S2 engine: 6 object types, 9 link types and 6 actions registered. |
+| Worked example | `tools/seed-chain` | Runs end to end against a live engine, and is safe to re-run. |
 | MAVLink simulator | `tools/mavlink-sim` | Built. |
 | HILS, CAN, simulator and build connectors | | Planned. |
 | Workflow orchestration of the build gate | | Planned. |

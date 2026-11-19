@@ -161,9 +161,8 @@ S2's baseline policy applies to all of them: requesting needs the `operator` rol
 
 ## 9. Planned work
 
-1. Apply the pack to a running S2 engine and run the worked example end to end.
-2. HILS connector: bench run metadata, verdicts and anomaly windows into `TestRun` and `Anomaly`.
-3. Source-timestamped telemetry for bench use: PTP clock, per-signal rates above 1 Hz.
-4. CAN gateway for bench buses.
-5. Build-provenance connector from the offline CI pipeline.
-6. Orchestrated build gate: simulation pass, bench pass, flight clearance.
+1. HILS connector: bench run metadata, verdicts and anomaly windows into `TestRun` and `Anomaly`.
+2. Source-timestamped telemetry for bench use: PTP clock, per-signal rates above 1 Hz.
+3. CAN gateway for bench buses.
+4. Build-provenance connector from the offline CI pipeline.
+5. Orchestrated build gate: simulation pass, bench pass, flight clearance.
