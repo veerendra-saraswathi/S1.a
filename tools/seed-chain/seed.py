@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -124,15 +125,40 @@ def plan() -> list[tuple[str, str, str, dict[str, Any]]]:
     return steps
 
 
-def fetch_token(token_url: str, client_id: str, user: str) -> str:
-    response = httpx.post(
-        token_url,
-        data={"grant_type": "password", "client_id": client_id, "username": user, "password": f"{user}-dev"},
-        timeout=10,
-    )
-    if response.status_code != 200:
-        sys.exit(f"could not get a token for '{user}' from {token_url}: {response.status_code} {response.text}")
-    return response.json()["access_token"]
+def fetch_token(token_url: str, client_id: str, user: str, attempts: int = 5) -> str:
+    """Ask Keycloak for a password-grant token, retrying while it is still warming up.
+
+    Keycloak answers 500 unknown_error for a while after Postgres restarts under it,
+    and refuses connections until its realm is loaded. Both clear on their own, so a
+    5xx or a transport error is retried with backoff. A 4xx is a real answer -- wrong
+    realm, client or password -- and fails at once.
+    """
+    last = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            response = httpx.post(
+                token_url,
+                data={
+                    "grant_type": "password",
+                    "client_id": client_id,
+                    "username": user,
+                    "password": f"{user}-dev",
+                },
+                timeout=10,
+            )
+        except httpx.TransportError as exc:
+            last = f"{type(exc).__name__}: {exc}"
+        else:
+            if response.status_code == 200:
+                return response.json()["access_token"]
+            last = f"{response.status_code} {response.text[:200]}"
+            if response.status_code < 500:
+                break
+        if attempt < attempts:
+            delay = 2 ** (attempt - 1)
+            print(f"token for '{user}': {last}; retrying in {delay}s ({attempt}/{attempts - 1})")
+            time.sleep(delay)
+    sys.exit(f"could not get a token for '{user}' from {token_url}: {last}")
 
 
 def main() -> None:
