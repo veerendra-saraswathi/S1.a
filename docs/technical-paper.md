@@ -83,8 +83,8 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 | The ontology pack is well-formed | Loaded with S2's schema classes; action checks replicated from S2's registry | Pass |
 | The seed requests are valid | Bodies validated with S2's request models; paths matched against the engine's route table | Pass |
 | The pack applies to a live engine | Applied to the Compose stack; object, link and action types registered | Pass |
-| The worked example runs end to end | 25 requests against a live engine: 9 objects, 11 links, three actions executed, `clearBuildForFlight` held at 202 | Pass |
-| Re-running the seed changes nothing twice | Second run: pack reported unchanged, objects replaced, links no-ops, the anomaly refused with 409, one approval request | Pass |
+| The worked example runs end to end | 26 requests against a live engine: 9 objects, 11 links, three actions executed, and `baselineDocument` and `clearBuildForFlight` both held at 202 | Pass |
+| Re-running the seed changes nothing twice | Second run: pack reported unchanged, objects replaced, links no-ops, the anomaly refused with 409, and one pending request per approval-gated action | Pass |
 
 **Not yet verified:** any run against a real autopilot or SITL; throughput, latency or resource use of the gateway; behaviour on a lossy link. The live-engine checks were made against S2's `phase2-action-executor` branch; the rest were made against its code.
 

@@ -7,8 +7,8 @@
 The example is a single thread through the traceability chain: a system requirement,
 the software requirement derived from it, the build that implements it, a simulation
 run that passes, a HILS run that fails, the anomaly found in it and the subsystem it is
-traced to. It ends by asking for the build to be cleared for flight, which S2 holds for
-a second person's approval.
+traced to. It asks for the requirements document to be baselined and for the build to be
+cleared for flight, and S2 holds both for a second person's approval.
 
     uv run tools/seed-chain/seed.py              # against the local S2 Compose stack
     uv run tools/seed-chain/seed.py --dry-run    # print the requests, send nothing
@@ -16,7 +16,7 @@ a second person's approval.
 It needs S2's core-fleet pack and demo drones (`make seed` in the S2 repo) and uses the
 dev realm's users: `admin` defines and writes objects, `operator` requests actions.
 Running it again resets the example: objects are replaced, links are no-ops, the anomaly
-is kept, and the flight-clearance request is not duplicated.
+is kept, and neither approval request is duplicated.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ DRONE = "DRN-0001"  # created by S2's seed-demo
 OBJECTS: list[tuple[str, str, dict[str, Any]]] = [
     ("EngineeringDocument", "DOC-SYSRS-001", {
         "title": "System requirements, night navigation", "kind": "SYSRS", "revision": "B",
-        "status": "BASELINED", "author": "HUMAN", "gitRef": "docs/sysrs/night-nav.md@4f2a9c1",
+        "status": "IN_REVIEW", "author": "HUMAN", "gitRef": "docs/sysrs/night-nav.md@4f2a9c1",
     }),
     ("EngineeringDocument", "DOC-SRS-001", {
         "title": "Software requirements, localisation service", "kind": "SRS", "revision": "A",
@@ -90,8 +90,18 @@ LINKS: list[tuple[str, str, str, str]] = [
     ("TestRun", "TR-HILS-0057", "ranOn", DRONE),
 ]
 
+# Actions that wait for approval, and the parameter naming their subject. The key built
+# from these keeps a re-run to one pending request per subject instead of a new one each time.
+APPROVAL_SUBJECT = {"baselineDocument": "documentId", "clearBuildForFlight": "buildId"}
+
 # (action, parameters), requested in order by the operator.
 ACTIONS: list[tuple[str, dict[str, Any]]] = [
+    # Needs approval, and the one action an agent may propose (agent_access: propose),
+    # which is the path M3's generated documents take.
+    ("baselineDocument", {
+        "documentId": "DOC-SYSRS-001", "revision": "B",
+        "note": "Seed example: shows the document gate. Approve it, the review is closed.",
+    }),
     ("raiseAnomaly", {
         "anomalyId": "ANM-0057-01", "testRunId": "TR-HILS-0057", "severity": "WARNING",
         "title": "Gimbal pitch response slower than the twin predicts",
@@ -184,8 +194,10 @@ def main() -> None:
             if user not in tokens:
                 tokens[user] = fetch_token(args.token_url, args.client_id, user)
             headers = {"Authorization": f"Bearer {tokens[user]}"}
-            if "clearBuildForFlight" in path:  # one approval request, however often this runs
-                headers["Idempotency-Key"] = "seed-chain:clearBuildForFlight:" + body["parameters"]["buildId"]
+            action = path.split("/")[3] if path.startswith("/v1/actions/") else ""
+            if action in APPROVAL_SUBJECT:
+                subject = body["parameters"][APPROVAL_SUBJECT[action]]
+                headers["Idempotency-Key"] = f"seed-chain:{action}:{subject}"
             response = client.request(method, path, json=body, headers=headers)
             if response.status_code == 409 and "raiseAnomaly" in path:
                 # S2 answers 409 when an action fails and changes nothing. On a re-run that is
@@ -206,7 +218,9 @@ def main() -> None:
             print(f"{response.status_code} {method} {path}{note}")
 
     print(
-        "\nSeeded. clearBuildForFlight is waiting in S2's Approvals queue: sign in as `approver` to reject it.\n"
+        "\nSeeded. Two requests wait in S2's Approvals queue for `approver` to decide:\n"
+        "  baselineDocument  DOC-SYSRS-001 rev B   approve it, the review is done\n"
+        "  clearBuildForFlight  BLD-FC-2026.11.3   reject it, the HILS run failed\n"
         "Try:  GET /v1/objects/Requirement/SYS-NAV-012/links/verifiedBy"
     )
 
