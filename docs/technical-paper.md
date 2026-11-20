@@ -52,7 +52,13 @@ MAVLink's `time_boot_ms` counts from autopilot boot and is not wall-clock time. 
 
 This gives one vehicle's signals millisecond alignment, and several vehicles alignment to the accuracy of their GNSS time. It does not give sub-millisecond agreement between separate bench subsystems in M2 and M6; that needs the subsystems on one PTP-disciplined clock, and stays future work.
 
-### 4.4 Delivery
+### 4.4 The CAN gateway
+
+Bench rigs in M2 and M6 speak DroneCAN on a CAN bus. The CAN gateway reads the bus as Linux can-utils logs it (`candump -L`), so it opens no CAN socket and has no way to transmit, the same observe-only rule as the MAVLink gateway. It reassembles multi-frame transfers per source node and data type, checks the toggle bit and transfer id, and verifies each transfer's CRC-16 over the data type's signature and payload, dropping and counting any transfer that fails. It decodes NodeStatus, ESC status, actuator status and actuator commands, and has been checked against the dronecan reference encoder.
+
+Commands are broadcast by the flight controller, but they are filed with the actuator they address, on the object of the node that reports that actuator, so commanded and measured position arrive in S2 on one object. That pair is what the M6 twin compares. Messages are stamped with the capture's kernel timestamps and cut into windows on capture time, so a recorded bench run uploaded later lands exactly as it happened.
+
+### 4.5 Delivery
 
 Messages are published at MQTT QoS 0. S2's own design accepts loss of periodic telemetry at this hop and makes everything downstream replayable from Kafka. The gateway reconnects on failure and counts what it could not send. Events that must not be lost, such as a bench verdict, do not travel this path; they go through S2's API as actions.
 
@@ -81,6 +87,9 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 | Corrupt frames are rejected | A flipped payload byte; the following frame must still parse | Pass |
 | Signed and incompatible v2 frames are handled | Constructed frames with the relevant flags | Pass |
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own `envelope_from_mqtt` | All messages valid |
+| The CAN gateway decodes DroneCAN correctly | Frames for NodeStatus, ESC status, actuator status and ArrayCommand, single- and multi-frame, encoded by the dronecan package and decoded field by field; a flipped byte fails the transfer CRC; a lost frame drops the transfer; interleaved transfers from two nodes both complete | Pass |
+| A simulated bench becomes S2 telemetry | 20 s of a gimbal rig (50 Hz commands and status, 10 Hz ESCs, 1 Hz NodeStatus): 8,460 frames, 3,860 transfers, none failed; 420 messages, all valid under S2's `envelope_from_mqtt`. A reduced-gain fault at 10 s took the pitch axis from 1.00 to 0.60 of its command, and the gimbal's health to WARNING | Pass |
+| A live bench capture reaches TimescaleDB | The simulator in real time, piped through the gateway to the broker for 12 s: 252 messages stored at 10.00 Hz, stamped with capture time. A binding fault at 6 s raised the stored pitch tracking error from 0.014 to 0.073 rad, capped at the rig's 0.1 rad | Pass |
 | Messages carry source time at 10 Hz | Three simulated drones whose clocks run 250, 500 and 750 ms ahead, through the gateway at 10 Hz for 12 s: 120 messages each at 10.1 Hz, every one `gnss`, offsets measured at 249.9, 500.0 and 750.0 ms, spacing 94-104 ms, none backwards, all valid under S2's `envelope_from_mqtt`. Without SYSTEM_TIME, every message `estimated` | Pass |
 | Source time survives the S2 pipeline | 8 s of the same run published to the broker: TimescaleDB holds 80 positions per drone at 10.0 Hz, keyed by vehicle time, with the offsets stored. Ingest minus source time was 804, 554 and 304 ms, which with each drone's skew gives one pipeline latency, 1,054 ms | Pass |
 | MQTT publishing works and recovers | Published to a broker, broker stopped and restarted, publishing resumed | Pass |
@@ -98,7 +107,7 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 | The gate refuses a step the named run did not earn | On a live engine, with S2 showing the policy the run (`policy_context`): `advanceBuild` to `BENCH_PASSED` on BLD-FC-2026.11.3 refused at 403 four times, naming a failed HILS run ("has not passed: it is COMPLETED with verdict FAIL"), another build's run ("did not test this build"), a simulation run ("does not earn BENCH_PASSED") and a missing run. Before the change the failed run had advanced the build | Pass |
 | Re-running the seed changes nothing twice | Second run: pack reported unchanged, objects replaced, links no-ops, the anomaly refused with 409, and one pending request per approval-gated action | Pass |
 
-**Not yet verified:** any run against a real autopilot or SITL; throughput, latency or resource use of the gateway; behaviour on a lossy link. The live-engine checks were made against S2's `phase2-action-executor` branch; the rest were made against its code.
+**Not yet verified:** the CAN gateway on a real bus, which needs a Linux bench PC; any run against a real autopilot or SITL; throughput, latency or resource use of the gateway; behaviour on a lossy link. The live-engine checks were made against S2's `phase2-action-executor` branch; the rest were made against its code.
 
 ## 7. Limitations and open questions
 
@@ -111,7 +120,7 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 
 ## 8. Roadmap
 
-Next, in order: add CAN; then orchestrate the build gate as a durable workflow that advances a build from simulation to bench to an approval request.
+Next, in order: run the CAN gateway on a real bench; then orchestrate the build gate as a durable workflow that advances a build from simulation to bench to an approval request.
 
 ## References
 

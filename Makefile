@@ -7,16 +7,21 @@
 #   make test        parser and mapping tests
 #   make run-dry     the gateway prints what it would publish
 #   make sim         three simulated drones
+#   make can-dry     a simulated DroneCAN bench through the CAN gateway, printed
+#   make can-run     the same bench, live, published to the S2 broker
 #   make run         publish telemetry to the S2 broker
 #   make seed        apply the ontology pack and load the worked example
 #   make gate        walk a build through the gate, from record to bench pass
 #
 # `make help` lists everything.
 
-GATEWAY_DIR := gateways/mavlink-gateway
+GATEWAYS    := gateways
 BIN         := bin/mavlink-gateway
-GOLDEN      := $(GATEWAY_DIR)/internal/mavlink/testdata/golden.txt
+CAN_BIN     := bin/can-gateway
+GOLDEN      := $(GATEWAYS)/mavlink-gateway/internal/mavlink/testdata/golden.txt
+CAN_GOLDEN  := $(GATEWAYS)/can-gateway/internal/dronecan/testdata/golden.log
 SIM         := tools/mavlink-sim/sim.py
+CAN_SIM     := tools/can-sim/sim.py
 CONNECTORS  := connectors
 SEED        := tools/seed-chain/seed.py
 POLICY      := policies/s2/actions/build_gate.rego
@@ -28,12 +33,15 @@ S2_DIR ?= ../S2
 VEHICLES ?= 1=DRN-0001,2=DRN-0002,3=DRN-0003
 DRONES   ?= 3
 RATE_HZ  ?= 1
+# The simulated bench's DroneCAN nodes: flight controller, gimbal, ESC board.
+CAN_NODES ?= 1=SUB-DRN1-FC,10=SUB-DRN1-GIMBAL,20=SUB-DRN1-ESC
+CAN_FAULT ?= reduced_gain
 REPORT   ?= $(CONNECTORS)/examples/TR-HILS-0058.json
 RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-gateway test-connectors test-policy install-policy build run run-dry \
-        sim seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
+.PHONY: help test test-gateway test-connectors test-policy install-policy build build-can run run-dry \
+        sim can-dry can-run can-golden seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
         golden lint fmt clean
 
 help:  ## list the targets
@@ -43,8 +51,8 @@ help:  ## list the targets
 
 test: test-gateway test-connectors  ## run every test
 
-test-gateway:  ## the gateway's parser and mapping tests
-	cd $(GATEWAY_DIR) && go test ./...
+test-gateway:  ## both gateways' parser, decoder and mapping tests
+	cd $(GATEWAYS) && go test ./...
 
 test-connectors:  ## the connectors' contract and mapping tests
 	cd $(CONNECTORS) && uv run --quiet pytest -q
@@ -59,9 +67,13 @@ install-policy:  ## copy the build gate's policy into the S2 checkout, where S2'
 	cp $(POLICY) $(S2_DIR)/policies/s2/actions/
 	@echo "installed. S2's OPA reloads on save; if a gate request is denied with no reason, docker restart s2-opa"
 
-build:  ## compile the gateway to bin/mavlink-gateway
+build:  ## compile the MAVLink gateway to bin/mavlink-gateway
 	@mkdir -p bin
-	cd $(GATEWAY_DIR) && go build -o $(CURDIR)/$(BIN) ./cmd/mavlink-gateway
+	cd $(GATEWAYS) && go build -o $(CURDIR)/$(BIN) ./mavlink-gateway/cmd/mavlink-gateway
+
+build-can:  ## compile the CAN gateway to bin/can-gateway
+	@mkdir -p bin
+	cd $(GATEWAYS) && go build -o $(CURDIR)/$(CAN_BIN) ./can-gateway/cmd/can-gateway
 
 run-dry: build  ## print what would be published, connecting to nothing
 	./$(BIN) -vehicles $(VEHICLES) -rate-hz $(RATE_HZ) -dry-run
@@ -71,6 +83,12 @@ run: build  ## publish telemetry for DRN-0001..3 to the S2 broker
 
 sim:  ## send MAVLink from simulated drones to the gateway
 	uv run $(SIM) --drones $(DRONES)
+
+can-dry: build-can  ## 20 s of a simulated DroneCAN bench, with a fault at 10 s, printed (CAN_FAULT=...)
+	uv run $(CAN_SIM) --seconds 20 --fault $(CAN_FAULT) --fault-at 10 | ./$(CAN_BIN) -nodes $(CAN_NODES) -dry-run
+
+can-run: build-can  ## the simulated bench in real time, published to the S2 broker (Ctrl-C to stop)
+	uv run $(CAN_SIM) --realtime --seconds 0 --fault $(CAN_FAULT) --fault-at 10 | ./$(CAN_BIN) -nodes $(CAN_NODES)
 
 seed: install-policy  ## apply the ontology pack and load the worked example into S2
 	uv run $(SEED)
@@ -94,16 +112,19 @@ gate:  ## walk build 2026.11.4 through the gate: recorded, simulation passed, be
 	uv run --project $(CONNECTORS) build-submit $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 	uv run --project $(CONNECTORS) hils-submit $(CONNECTORS)/examples/TR-HILS-0059.json
 
-golden:  ## regenerate the golden frames (overwrites the test fixture)
+golden:  ## regenerate the MAVLink golden frames (overwrites the test fixture)
 	uv run tools/mavlink-sim/gen_golden.py > $(GOLDEN)
 
+can-golden:  ## regenerate the DroneCAN golden frames (overwrites the test fixture)
+	uv run tools/can-sim/gen_golden.py > $(CAN_GOLDEN)
+
 lint:  ## vet the Go code and lint the Python
-	cd $(GATEWAY_DIR) && go vet ./...
+	cd $(GATEWAYS) && go vet ./...
 	uvx ruff check tools
 	cd $(CONNECTORS) && uvx ruff check .
 
-fmt:  ## gofmt the gateway
-	cd $(GATEWAY_DIR) && gofmt -w .
+fmt:  ## gofmt the gateways
+	cd $(GATEWAYS) && gofmt -w .
 
 clean:  ## remove build output
 	rm -rf bin

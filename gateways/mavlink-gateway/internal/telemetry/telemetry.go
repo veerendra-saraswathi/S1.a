@@ -24,32 +24,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/clock"
+	"github.com/veerendra-saraswathi/S1.a/gateways/internal/clock"
+	"github.com/veerendra-saraswathi/S1.a/gateways/internal/s2"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/mavlink"
 )
 
-// Position is the contract's optional position block.
-type Position struct {
-	Lat        float64  `json:"lat"`
-	Lon        float64  `json:"lon"`
-	AltM       *float64 `json:"alt_m,omitempty"`
-	HeadingDeg *float64 `json:"heading_deg,omitempty"`
-	SpeedMps   *float64 `json:"speed_mps,omitempty"`
-}
-
-// Message is the MQTT payload.
-type Message struct {
-	TS       string         `json:"ts"`
-	Metrics  map[string]any `json:"metrics,omitempty"`
-	Position *Position      `json:"position,omitempty"`
-	Seq      uint64         `json:"seq"`
-}
-
-// Outbound is one message ready to publish.
-type Outbound struct {
-	Topic   string
-	Message Message
-}
+// The contract's types, shared by every gateway (package s2).
+type (
+	Position = s2.Position
+	Message  = s2.Message
+	Outbound = s2.Outbound
+)
 
 // Config says how MAVLink systems map onto S2 objects.
 type Config struct {
@@ -190,8 +175,8 @@ func (a *Aggregator) Flush(now time.Time) []Outbound {
 			v.metrics["clock_offset_ms"] = math.Round(float64(offset.Microseconds())/100) / 10
 		}
 		out = append(out, Outbound{
-			Topic:   fmt.Sprintf("s2/v1/%s/%s/%s/telemetry", a.cfg.TenantID, a.cfg.ObjectType, a.ObjectKey(uint8(id))),
-			Message: Message{TS: ts.UTC().Format(timeLayout), Metrics: v.metrics, Position: v.position, Seq: v.seq},
+			Topic:   s2.Topic(a.cfg.TenantID, a.cfg.ObjectType, a.ObjectKey(uint8(id))),
+			Message: Message{TS: s2.Timestamp(ts), Metrics: v.metrics, Position: v.position, Seq: v.seq},
 		})
 		v.metrics, v.position, v.sampled = make(map[string]any), nil, false
 	}
@@ -206,9 +191,6 @@ func (a *Aggregator) vehicle(sysID uint8) *vehicle {
 	}
 	return v
 }
-
-// timeLayout is RFC 3339 in UTC with milliseconds, the resolution of time_boot_ms.
-const timeLayout = "2006-01-02T15:04:05.000Z"
 
 // Reboots is how many autopilot reboots the gateway has seen, per system id.
 func (a *Aggregator) Reboots() map[uint8]uint64 {

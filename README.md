@@ -95,7 +95,7 @@ write, and what it is still waiting for.
 | **M3** Generated aviation documents | Requirements and documents with traceability | `Requirement` and `EngineeringDocument` across the SYSRS, IRS, MOM, SRS, SDD, ICD, STP and STR kinds, and `baselineDocument` — proposable by an agent, approved by a person | A generator that writes the documents and requests the baseline |
 | **M4** Offline agentic engineering platform | Source, builds, unit and SITL test reports | Everything but the source, through the build connector: `SoftwareBuild` with its commit and artifact digest, `implements` links, and unit and SITL runs closed with verdicts | A pipeline that emits `s2.build-record/v1`; S2's offline install path is untested |
 | **M5** Multi-drone GIS simulator | Simulated missions and telemetry | Simulated telemetry enters on the same contract as an aircraft, which `tools/mavlink-sim` demonstrates; `TestRun` of kind `SIMULATION` | Scenarios and GIS terrain are not modelled |
-| **M6** Actuator visual twin | Fault classifications | The `Anomaly` fault taxonomy is M6's — reduced gain, binding, frequency shift, increased damping, timing drift — with `VISUAL_TWIN` as a detector | A CAN gateway for the rig's bus; a twin that writes classifications |
+| **M6** Actuator visual twin | Fault classifications | The `Anomaly` fault taxonomy is M6's — reduced gain, binding, frequency shift, increased damping, timing drift — with `VISUAL_TWIN` as a detector | Commanded and measured actuator position reach S2 through the CAN gateway, side by side on the actuator's `Subsystem` | A twin that writes classifications; a run of the CAN gateway on a real rig |
 
 **Two of the six have a built and verified path into the record.** The other four have
 their object types, link types and actions defined and are waiting on the module itself.
@@ -111,7 +111,8 @@ their object types, link types and actions defined and are waiting on the module
 | Build gate | `policies`, `connectors` | Built. `advanceBuild` and its policy; both connectors ask for the step a passed run earns. The policy sees the run a step names (S2's `policy_context`) and refuses one that is missing, failed, of another build or the wrong kind. Tested under OPA, against a stubbed engine and on a live engine |
 | Worked example | `tools/seed-chain` | Runs end to end against a live engine at pack 0.4.0, and is safe to re-run |
 | MAVLink simulator | `tools/mavlink-sim` | Built |
-| CAN and simulator connectors | | Planned |
+| CAN gateway | `gateways/can-gateway` | Built. Reads `candump -L`; DroneCAN NodeStatus, ESC status and actuator status and commands, multi-frame transfers CRC-checked. Decoder tested against the dronecan package; a simulated bench run end to end into TimescaleDB. Not yet run on a real bus |
+| CAN bench simulator | `tools/can-sim` | Built. A gimbal rig with injectable actuator faults |
 
 ## What has been verified
 
@@ -120,6 +121,8 @@ their object types, link types and actions defined and are waiting on the module
 | The parser decodes MAVLink correctly | Frames for every decoded message, encoded by pymavlink in v1 and v2, compared field by field |
 | It survives fragmentation, noise and corruption | A multi-frame stream fed one byte at a time with leading garbage; a flipped payload byte |
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own validator |
+| The CAN gateway reads DroneCAN correctly | Frames for every decoded type, encoded by the dronecan package, decoded and compared field by field; a corrupted transfer fails its CRC, a lost frame drops it |
+| A bench fault reaches S2 | A simulated gimbal rig through the CAN gateway into TimescaleDB at 10 Hz: a binding fault raised the pitch tracking error from 0.014 to 0.073 rad and the gimbal's health to WARNING |
 | Telemetry carries source time | Three simulated drones with clocks 250, 500 and 750 ms ahead, at 10 Hz into TimescaleDB: stored at vehicle time, offsets measured to 0.1 ms, none out of order |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
 | The worked example runs end to end | At pack 0.4.0: 27 requests against a live engine; the build advanced to `SIM_PASSED` through the gate, the document baseline held for a second person, and flight clearance refused in the policy's words |
@@ -178,9 +181,13 @@ make gate
 this one (`S2_DIR=../S2`), where S2's OPA picks it up. `make gate` then walks build
 2026.11.4 through: recorded, simulation passed, bench passed.
 
+For the bench side, `make can-dry` runs a simulated DroneCAN gimbal rig through the CAN
+gateway and prints what it would publish; `make can-run` publishes it live.
+
 Stop S2's own telemetry simulator first, or both will write to the same drones. `make
-help` lists every target. Gateway flags, published metrics and known limits are in the
-[gateway README](gateways/mavlink-gateway/README.md).
+help` lists every target. Flags, published metrics and known limits are in the
+[MAVLink gateway](gateways/mavlink-gateway/README.md) and
+[CAN gateway](gateways/can-gateway/README.md) READMEs.
 
 ## Documentation
 

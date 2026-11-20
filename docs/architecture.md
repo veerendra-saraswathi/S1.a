@@ -31,7 +31,7 @@ flowchart TB
     subgraph S1a["S1.a"]
         GW[mavlink-gateway]
         HC[bench connector]
-        CC[can-gateway, planned]
+        CC[can-gateway]
         BC[build connector]
         PACK[drone-engineering pack]
         SEED[seed-chain]
@@ -49,7 +49,9 @@ flowchart TB
     M5 -- MAVLink UDP --> GW
     GW -- MQTT, contract v1 --> MQ --> K --> TSDB
     M2 -.-> HC --> ENG
-    M6 -.-> CC -.-> MQ
+    M2 -- candump -L --> CC
+    M6 -- candump -L --> CC
+    CC -- MQTT, contract v1 --> MQ
     M34 -.-> BC --> ENG
     PACK -- apply --> ENG
     SEED -- REST --> ENG
@@ -164,7 +166,8 @@ S2's baseline policy applies to all of them: requesting needs the `operator` rol
 
 ## 9. Planned work
 
-1. CAN gateway for bench buses.
+1. The CAN gateway on a real bench bus. It is built and run on recorded and simulated
+   captures; live SocketCAN capture on Linux has not been exercised.
 2. A PTP-disciplined clock for bench subsystems, for sub-millisecond agreement between
    them. The MAVLink gateway already stamps telemetry with source time (its README).
 3. Durable orchestration of the build gate, from simulation to bench to an approval

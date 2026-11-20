@@ -49,7 +49,7 @@ Nothing in this section exists in the repository yet. Choices marked "proposed" 
 |---|---|---|---|
 | Temporal, self-hosted | Orchestrating the build gate across simulation, bench and approval | Proposed | Durable workflows that survive multi-day waits for approval; runs offline; Python and Go SDKs. Argo Workflows is the alternative if everything should be Kubernetes-native. |
 | PTP (IEEE 1588) | Source timestamps for bench telemetry | Proposed | Correlating HILS and actuator signals needs sub-millisecond clock agreement, which gateway-side timestamps cannot give. |
-| DroneCAN / CAN | Bench bus telemetry | Planned | Module 2 and Module 6 inputs include CAN. |
+| DroneCAN / CAN | Bench bus telemetry | Built, not yet on a real bus | Module 2 and Module 6 inputs include CAN. The gateway reads `candump -L` from Linux can-utils rather than opening a SocketCAN socket: no cgo or `unsafe`, the capture's kernel timestamps for free, and it cannot transmit. |
 | MCAP or Parquet | Raw bench and flight logs in the lakehouse | Proposed | High-rate signals belong in files indexed by test run, not in per-reading rows. |
 | Signed build attestations (in-toto / SLSA style) | Linking each `SoftwareBuild` to its commit and pipeline run | Proposed | Makes build provenance verifiable, which certification evidence needs. |
 | C++ | Module 1 onboard navigation | From the specification | Real-time localisation on NVIDIA Jetson Orin NX. |

@@ -26,8 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/veerendra-saraswathi/S1.a/gateways/internal/mqtt"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/mavlink"
-	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/mqtt"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/telemetry"
 )
 
