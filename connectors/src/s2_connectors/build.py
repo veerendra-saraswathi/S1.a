@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from s2_connectors.contract import check, read
-from s2_connectors.model import ADMIN, Call, Run, advance_build, record_verdict, run_links, run_write
+from s2_connectors.model import ADMIN, Call, Run, advance_build, record_verdict, run_links, run_writes
 
 CONTRACT = "s2.build-record/v1"
 SCHEMA = "build-record-v1.schema.json"
@@ -102,7 +102,7 @@ def plan(record: BuildRecord) -> list[Call]:
     ]
 
     for run in record.testRuns:
-        calls.append(run_write(run))
+        calls += run_writes(run)
         calls += run_links(run)
         calls.append(record_verdict(run, source))
 

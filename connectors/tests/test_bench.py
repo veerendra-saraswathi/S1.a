@@ -103,6 +103,7 @@ def test_a_missing_file_says_so(tmp_path):
 def test_the_sequence_the_worked_example_becomes():
     assert steps(bench.load(EXAMPLE)) == [
         ("admin", "PUT", "/v1/objects/TestRun/TR-HILS-0058"),
+        ("admin", "PATCH", "/v1/objects/TestRun/TR-HILS-0058"),
         ("admin", "POST", "/v1/objects/TestRun/TR-HILS-0058/links/testsBuild"),
         ("admin", "POST", "/v1/objects/TestRun/TR-HILS-0058/links/ranOn"),
         ("admin", "POST", "/v1/objects/TestRun/TR-HILS-0058/links/verifies"),
@@ -121,6 +122,20 @@ def test_the_run_is_written_without_its_verdict():
     assert properties["logUri"] == "s3://s2-bench-logs/TR-HILS-0058/"
 
 
+def test_the_run_is_only_created_and_its_refresh_leaves_the_verdict_alone():
+    """A re-sent report must not put a closed run back to RUNNING and wipe its verdict.
+
+    The verdict request only replays on a re-send, so it would not set the verdict again.
+    """
+    create, refresh = bench.plan(bench.load(EXAMPLE))[:2]
+    assert create.headers == {"If-None-Match": "*"}
+    assert create.tolerate_409 is True
+    assert refresh.method == "PATCH"
+    assert "status" not in refresh.body["properties"]
+    assert "verdict" not in refresh.body["properties"]
+    assert refresh.body["properties"]["logUri"] == "s3://s2-bench-logs/TR-HILS-0058/"
+
+
 def test_properties_the_bench_left_out_are_not_sent(bench_document):
     """A PUT replaces the object, so an absent property must be absent, not null."""
     del bench_document["run"]["bench"]
@@ -131,7 +146,7 @@ def test_properties_the_bench_left_out_are_not_sent(bench_document):
 
 
 def test_the_anomaly_window_reaches_the_action():
-    raised = bench.plan(bench.load(EXAMPLE))[4].body["parameters"]
+    raised = bench.plan(bench.load(EXAMPLE))[5].body["parameters"]
     assert raised["detectedAt"] == "2026-11-19T19:02:18Z"
     assert raised["durationS"] == pytest.approx(6.6)
     assert raised["testRunId"] == "TR-HILS-0058"
@@ -167,8 +182,8 @@ def test_a_corrected_verdict_is_not_a_replay(bench_document):
 
 
 def test_raising_the_same_anomaly_twice_uses_the_same_key():
-    first = bench.plan(bench.load(EXAMPLE))[4]
-    assert first.idempotency_key == bench.plan(bench.load(EXAMPLE))[4].idempotency_key
+    first = bench.plan(bench.load(EXAMPLE))[5]
+    assert first.idempotency_key == bench.plan(bench.load(EXAMPLE))[5].idempotency_key
     assert first.tolerate_409 is True
 
 

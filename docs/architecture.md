@@ -166,10 +166,8 @@ S2's baseline policy applies to all of them: requesting needs the `operator` rol
 
 1. Source-timestamped telemetry for bench use: PTP clock, per-signal rates above 1 Hz.
 2. CAN gateway for bench buses.
-3. The build gate against a live engine. `advanceBuild`, its policy and the connectors
-   that drive it are built and tested without one.
-4. Evidence the policy can check: S2 passing a policy the run a gate step names, so
-   "this run passed and tested this build" stops being the requester's claim.
+3. Durable orchestration of the build gate, from simulation to bench to an approval
+   request.
 
 The bench and build connectors and the build gate are built; see the connectors'
 [README](../connectors/README.md). What the connectors wait on is a bench and a pipeline

@@ -21,6 +21,16 @@ build(status) := {
 	"properties": {"status": status},
 }
 
+# The run a step names, passed, of the kind that earns the stage.
+kind_for := {"SIM_PASSED": "SITL", "BENCH_PASSED": "HILS", "CLEARED_FOR_FLIGHT": "FLIGHT"}
+
+earning_run(kind) := {
+	"object_type": "TestRun",
+	"primary_key": "TR-1",
+	"properties": {"testRunId": "TR-1", "kind": kind, "status": "COMPLETED", "verdict": "PASS"},
+	"links": {"testsBuild": ["BLD-FC-2026.11.4"]},
+}
+
 step(status, stage) := {
 	"stage": "request",
 	"actor": operator,
@@ -28,7 +38,10 @@ step(status, stage) := {
 	"action": advance,
 	"parameters": {"buildId": "BLD-FC-2026.11.4", "stage": stage, "testRunId": "TR-1"},
 	"target": build(status),
+	"context": {"run": earning_run(object.get(kind_for, stage, "SITL"))},
 }
+
+with_run(input_doc, patch) := json.patch(input_doc, patch)
 
 clearance(stage, actor, status) := {
 	"stage": stage,
@@ -88,6 +101,76 @@ test_advancing_still_needs_the_operator_role if {
 test_an_agent_cannot_advance_a_build if {
 	bad := object.union(step("BUILT", "SIM_PASSED"), {"actor": agent})
 	not build_gate.allow with input as bad
+}
+
+# --- the evidence a step names --------------------------------------------------
+
+test_a_simulation_run_also_earns_sim_passed if {
+	ok := with_run(step("BUILT", "SIM_PASSED"), [{"op": "replace", "path": "/context/run/properties/kind", "value": "SIMULATION"}])
+	build_gate.allow with input as ok
+}
+
+test_a_failed_run_earns_nothing if {
+	bad := with_run(step("SIM_PASSED", "BENCH_PASSED"), [{"op": "replace", "path": "/context/run/properties/verdict", "value": "FAIL"}])
+	not build_gate.allow with input as bad
+	"test run TR-1 has not passed: it is COMPLETED with verdict FAIL" in build_gate.deny with input as bad
+}
+
+test_an_inconclusive_run_earns_nothing if {
+	bad := with_run(step("BUILT", "SIM_PASSED"), [{"op": "replace", "path": "/context/run/properties/verdict", "value": "INCONCLUSIVE"}])
+	not build_gate.allow with input as bad
+}
+
+test_a_run_still_going_earns_nothing if {
+	bad := with_run(step("BUILT", "SIM_PASSED"), [
+		{"op": "replace", "path": "/context/run/properties/status", "value": "RUNNING"},
+		{"op": "remove", "path": "/context/run/properties/verdict"},
+	])
+	not build_gate.allow with input as bad
+	"test run TR-1 has not passed: it is RUNNING with verdict (none)" in build_gate.deny with input as bad
+}
+
+test_a_run_of_another_build_earns_nothing if {
+	bad := with_run(step("BUILT", "SIM_PASSED"), [{"op": "replace", "path": "/context/run/links/testsBuild", "value": ["BLD-FC-2026.11.3"]}])
+	not build_gate.allow with input as bad
+	"test run TR-1 did not test this build" in build_gate.deny with input as bad
+}
+
+test_a_run_linked_to_no_build_earns_nothing if {
+	bad := with_run(step("BUILT", "SIM_PASSED"), [{"op": "replace", "path": "/context/run/links/testsBuild", "value": []}])
+	not build_gate.allow with input as bad
+}
+
+test_a_simulation_does_not_earn_the_bench if {
+	bad := with_run(step("SIM_PASSED", "BENCH_PASSED"), [{"op": "replace", "path": "/context/run/properties/kind", "value": "SITL"}])
+	not build_gate.allow with input as bad
+	"a SITL run does not earn BENCH_PASSED" in build_gate.deny with input as bad
+}
+
+test_the_bench_does_not_earn_simulation if {
+	bad := with_run(step("BUILT", "SIM_PASSED"), [{"op": "replace", "path": "/context/run/properties/kind", "value": "HILS"}])
+	not build_gate.allow with input as bad
+}
+
+test_a_unit_run_earns_nothing if {
+	every stage in ["SIM_PASSED", "BENCH_PASSED"] {
+		bad := with_run(step(needs_for[stage], stage), [{"op": "replace", "path": "/context/run/properties/kind", "value": "UNIT"}])
+		not build_gate.allow with input as bad
+	}
+}
+
+needs_for := {"SIM_PASSED": "BUILT", "BENCH_PASSED": "SIM_PASSED"}
+
+test_a_missing_run_is_denied if {
+	bad := object.union(step("BUILT", "SIM_PASSED"), {"context": {"run": null}})
+	not build_gate.allow with input as bad
+	"test run TR-1 does not exist" in build_gate.deny with input as bad
+}
+
+test_an_engine_that_sends_no_context_is_denied if {
+	bad := json.remove(step("BUILT", "SIM_PASSED"), ["/context"])
+	not build_gate.allow with input as bad
+	"test run TR-1 does not exist" in build_gate.deny with input as bad
 }
 
 # --- clearBuildForFlight --------------------------------------------------------

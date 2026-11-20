@@ -85,17 +85,32 @@ def _present(source: Any, keys: tuple[str, ...]) -> dict[str, Any]:
     return {key: getattr(source, key) for key in keys if getattr(source, key) is not None}
 
 
-def run_write(run: Run) -> Call:
-    """Write the run, minus its verdict.
+def run_writes(run: Run) -> list[Call]:
+    """Write the run, minus its verdict: create it once, then refresh its metadata.
 
-    The run is written as RUNNING even when the reporter says it finished: `status` and
+    The run is created as RUNNING even when the reporter says it finished: `status` and
     `verdict` are `recordTestVerdict`'s to set, and writing them here would put a
-    governed state into an ordinary write. A PUT replaces the whole object, so only the
-    properties the reporter supplied are sent and the rest stay unset.
+    governed state into an ordinary write. The create is guarded by If-None-Match, as a
+    build's is: a PUT replaces the whole object, so re-sending a report would put a
+    closed run back to RUNNING and wipe its verdict, while the verdict request only
+    replays and does not set it again. S2 answers 409 when the run exists, which here
+    means "already recorded". The PATCH then merges the metadata and leaves status and
+    verdict alone.
     """
-    properties = {"name": run.name, "kind": run.kind, "status": "RUNNING"}
-    properties.update(_present(run, ("bench", "startedAt", "endedAt", "logUri")))
-    return Call(ADMIN, "PUT", f"/v1/objects/TestRun/{run.testRunId}", {"properties": properties})
+    path = f"/v1/objects/TestRun/{run.testRunId}"
+    metadata = {"name": run.name, "kind": run.kind}
+    metadata.update(_present(run, ("bench", "startedAt", "endedAt", "logUri")))
+    return [
+        Call(
+            ADMIN,
+            "PUT",
+            path,
+            {"properties": {**metadata, "status": "RUNNING"}},
+            headers={"If-None-Match": "*"},
+            tolerate_409=True,
+        ),
+        Call(ADMIN, "PATCH", path, {"properties": metadata}),
+    ]
 
 
 def run_links(run: Run) -> list[Call]:

@@ -10,7 +10,7 @@
 #   s2ctl apply-pack ontologies/drone-engineering/pack.yaml     (needs the ontology-admin role)
 
 name: drone-engineering
-version: 0.3.0
+version: 0.4.0
 description: Requirements, documents, builds, test runs and anomalies for drone engineering.
 requires: [core-fleet]
 
@@ -372,6 +372,11 @@ action_types:
           status: "{{ params.stage }}"
           statusNote: "{{ params.note }}"
     policy_path: s2/actions/build_gate
+    # The run that earns the step, shown to the policy with the build it tested, so the
+    # gate checks the evidence instead of taking the requester's word for it.
+    # Needs an S2 engine with policy_context on action types.
+    policy_context:
+      run: {object_type: TestRun, key: "{{ params.testRunId }}", links: [testsBuild]}
 
   - api_name: clearBuildForFlight
     display_name: Clear build for flight

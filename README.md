@@ -105,11 +105,11 @@ their object types, link types and actions defined and are waiting on the module
 | Component | Path | State |
 |---|---|---|
 | MAVLink gateway | `gateways/mavlink-gateway` | Built. Parser tested against pymavlink; output validated against S2's contract code; MQTT tested against a broker, including reconnect |
-| Drone engineering ontology | `ontologies/drone-engineering` | 6 object types, 9 link types and 7 actions. Version 0.2.0 was applied to a live S2 engine; 0.3.0, which adds the build gate, has not been yet |
+| Drone engineering ontology | `ontologies/drone-engineering` | 6 object types, 9 link types and 7 actions. Version 0.4.0, whose gate checks the run a step names, applied to a live S2 engine |
 | HILS bench connector | `connectors` | Built. Bench report contract v1, and a report written into a live engine end to end |
 | Build provenance connector | `connectors` | Built. Build record contract v1, and a record written into a live engine end to end |
-| Build gate | `policies`, `connectors` | Built. `advanceBuild` and its policy; both connectors ask for the step a passed run earns. Policy tested under OPA, connectors against a stubbed engine. Not yet run against a live engine |
-| Worked example | `tools/seed-chain` | Ran end to end against a live engine at pack 0.2.0, and is safe to re-run. Not re-run since the gate changed it |
+| Build gate | `policies`, `connectors` | Built. `advanceBuild` and its policy; both connectors ask for the step a passed run earns. The policy sees the run a step names (S2's `policy_context`) and refuses one that is missing, failed, of another build or the wrong kind. Tested under OPA, against a stubbed engine and on a live engine |
+| Worked example | `tools/seed-chain` | Runs end to end against a live engine at pack 0.4.0, and is safe to re-run |
 | MAVLink simulator | `tools/mavlink-sim` | Built |
 | CAN and simulator connectors | | Planned |
 
@@ -121,15 +121,16 @@ their object types, link types and actions defined and are waiting on the module
 | It survives fragmentation, noise and corruption | A multi-frame stream fed one byte at a time with leading garbage; a flipped payload byte |
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own validator |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
-| The worked example runs end to end | At pack 0.2.0: 26 requests against a live engine, with both approval gates held awaiting a second person |
+| The worked example runs end to end | At pack 0.4.0: 27 requests against a live engine; the build advanced to `SIM_PASSED` through the gate, the document baseline held for a second person, and flight clearance refused in the policy's words |
 | A bench report becomes a test run | Submitted live: the run created and linked, two anomalies raised with their windows, one attributed, the verdict recorded |
 | A build record becomes a build | Submitted live: the build created, its metadata refreshed, one requirement implemented, unit and SITL runs closed `PASS` |
-| Re-submission changes nothing twice | Second submissions of both documents: duplicates refused, approval requests replayed, no build dragged backwards |
-| The gate's policy allows only the next step | 21 policy tests under OPA 1.20.2 with S2's baseline rules: every out-of-order step, every status but `BENCH_PASSED` at clearance, a late approval of a rejected build, missing input |
+| Re-submission changes nothing twice | Second submissions of both documents: duplicates refused, approval requests replayed, no build dragged backwards and no closed run reopened |
+| A step needs a run that earned it | On a live engine, four requests for `BENCH_PASSED` refused in the policy's words: a failed HILS run, another build's run, a simulation run, a run that does not exist |
+| The gate's policy allows only the next step | 32 policy tests under OPA 1.20.2 with S2's baseline rules: every out-of-order step, every run that did not earn its step, every status but `BENCH_PASSED` at clearance, a late approval of a rejected build, missing input |
+| The gate holds on a live engine | Build 2026.11.4 walked from `BUILT` to `BENCH_PASSED` by `make gate`; a step backwards refused with the policy's reason; its clearance request held at 202 for a second person |
 | The connectors ask for the right step | Tests against a stubbed engine: a passed SITL run asks for `SIM_PASSED`, a passed HILS run for `BENCH_PASSED`, a record with any failure asks for nothing, and a refusal is reported without failing the submission |
 
-**Not verified:** the build gate against a live engine, and the worked example since the
-gate changed it (27 requests now, one approval held and one clearance refused); any run
+**Not verified:** any run
 against a real autopilot or SITL; throughput, latency or resource use; behaviour on a
 lossy link. [The technical paper](docs/technical-paper.md)
 §6 is the full table and §7 the open questions.
@@ -161,7 +162,9 @@ make sim
 `make run-dry` prints what the gateway would publish and connects to nothing; run
 `make sim` beside it to feed three simulated drones in.
 
-With an S2 stack running locally (`make up` in the S2 repo):
+With an S2 stack running locally (`make up` in the S2 repo; run it again after pulling S2,
+since it rebuilds the images and migrates the database, and the gate needs S2's
+`policy_context`, migration 0006):
 
 ```bash
 make seed

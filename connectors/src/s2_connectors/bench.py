@@ -16,7 +16,7 @@ from s2_connectors.model import (
     raise_anomaly,
     record_verdict,
     run_links,
-    run_write,
+    run_writes,
 )
 
 CONTRACT = "s2.bench-report/v1"
@@ -59,7 +59,7 @@ def plan(report: BenchReport) -> list[Call]:
     asked about a run whose verdict is already on record.
     """
     run, source = report.run, report.source
-    calls = [run_write(run), *run_links(run)]
+    calls = [*run_writes(run), *run_links(run)]
     for anomaly in report.anomalies:
         calls.append(raise_anomaly(run, anomaly, source))
         if anomaly.attributed:

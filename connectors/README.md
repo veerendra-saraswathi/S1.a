@@ -39,8 +39,9 @@ uv run --project connectors build-submit RECORD.json [--api URL] [--dry-run]
 ```
 
 Apply the ontology pack first (`make seed` at the root). The connectors need the
-`drone-engineering` pack at **0.3.0 or later**, the version that added `advanceBuild`,
-and S2's OPA must be serving `policies/s2/actions/build_gate.rego`. `make seed` does both:
+`drone-engineering` pack at **0.4.0 or later**, the version whose `advanceBuild` shows
+the policy the run it names, an S2 engine with `policy_context` on action types (its
+migration 0006), and S2's OPA must be serving `policies/s2/actions/build_gate.rego`. `make seed` does both:
 it copies the policy into the S2 checkout at `S2_DIR` (`../S2` unless set) and applies
 the pack.
 
@@ -70,10 +71,12 @@ Decisions worth knowing about:
 finished. `status` and `verdict` belong to `recordTestVerdict`; a PUT that set them would
 put a governed state into an ordinary write, which is what the ontology exists to prevent.
 
-**A build is created, not replaced.** The create carries `If-None-Match: *` and tolerates
-the 409 that means "already recorded". A plain PUT would drag a build that has since
-reached `SIM_PASSED` back to `BUILT`, because a PUT replaces the whole object. A `PATCH`
-then refreshes the metadata without touching `status`.
+**A build and a run are created, not replaced.** The create carries `If-None-Match: *` and
+tolerates the 409 that means "already recorded". A plain PUT would drag a build that has
+since reached `SIM_PASSED` back to `BUILT`, and a closed run back to `RUNNING` with its
+verdict wiped, because a PUT replaces the whole object; the verdict request then only
+replays and would not set it again. A `PATCH` then refreshes the metadata without touching
+`status` or `verdict`.
 
 **Anomalies are raised before the verdict is recorded**, so a closed run is never left
 with its anomalies missing, and the verdict note can refer to them.
@@ -130,12 +133,12 @@ and needs `opa` and an S2 checkout for the baseline rules they build on.
 
 ## Known limits
 
-- **The gate has not run against a live engine.** The policy is tested under OPA and the
-  connectors against a stubbed engine; `make seed` and `make gate` on a running stack
-  are the check still owed.
-- **The policy cannot see the evidence.** S2 shows a policy the build, not the run named
-  in `testRunId`. That the run passed and tested this build is the connector's claim,
-  kept in the audit log. Checking it in the policy needs S2 to pass linked objects in.
+- **The gate checks the run, not the whole record.** The policy sees the run named in
+  `testRunId` and refuses one that does not exist, did not test this build, is not
+  `COMPLETED` with verdict `PASS`, or is the wrong kind for the step. That nothing else in
+  a build record failed is still checked only by the connector, before it asks.
+- **Only HILS earns the bench.** An `ACTUATOR_BENCH` run does not earn `BENCH_PASSED` until
+  someone decides it should.
 - **The policy lives in this repository and is served from S2's.** A pack cannot carry a
   policy yet, so `make install-policy` copies the file across. Until it is there every
   gate request is denied, which is the safe way round and an easy one to trip over.

@@ -40,7 +40,7 @@ def plan():
 def test_every_call_is_sent_in_order():
     client = FakeClient()
     submit(client, plan(), log=lambda _: None)
-    assert len(client.sent) == 8
+    assert len(client.sent) == 9
     assert client.sent[0][1] == "PUT"
     assert "recordTestVerdict" in client.sent[-1][2]
 
@@ -50,7 +50,7 @@ def test_an_already_recorded_anomaly_does_not_stop_the_submission():
     logged = []
     client = FakeClient({"raiseAnomaly": (409, {})})
     submit(client, plan(), log=logged.append)
-    assert len(client.sent) == 8
+    assert len(client.sent) == 9
     assert any("409" in line and "unchanged" in line for line in logged)
 
 
