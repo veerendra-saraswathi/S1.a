@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from s2_connectors.contract import check, read
-from s2_connectors.model import ADMIN, Call, Run, record_verdict, run_links, run_write
+from s2_connectors.model import ADMIN, Call, Run, advance_build, record_verdict, run_links, run_write
 
 CONTRACT = "s2.build-record/v1"
 SCHEMA = "build-record-v1.schema.json"
@@ -105,5 +105,14 @@ def plan(record: BuildRecord) -> list[Call]:
         calls.append(run_write(run))
         calls += run_links(run)
         calls.append(record_verdict(run, source))
+
+    # The simulation step is asked for once, after every verdict is recorded, and only
+    # by a record in which nothing failed: a build whose SITL run passed beside a
+    # failing unit run has not passed the pipeline. The first passed simulation run is
+    # the evidence named.
+    if all(run.verdict == "PASS" for run in record.testRuns):
+        step = next(filter(None, (advance_build(run, source) for run in record.testRuns)), None)
+        if step:
+            calls.append(step)
 
     return calls

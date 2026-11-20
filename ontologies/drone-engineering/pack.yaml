@@ -10,7 +10,7 @@
 #   s2ctl apply-pack ontologies/drone-engineering/pack.yaml     (needs the ontology-admin role)
 
 name: drone-engineering
-version: 0.2.0
+version: 0.3.0
 description: Requirements, documents, builds, test runs and anomalies for drone engineering.
 requires: [core-fleet]
 
@@ -346,9 +346,36 @@ action_types:
     requires_approval: true
     agent_access: propose
 
+  # The build gate. A build moves BUILT -> SIM_PASSED -> BENCH_PASSED one step at a time,
+  # each step naming the run that earned it, and only a BENCH_PASSED build may be put
+  # forward for flight. The order is enforced by the policy, not here: see
+  # policies/s2/actions/build_gate.rego, which S2's OPA must be serving.
+  - api_name: advanceBuild
+    display_name: Advance build
+    description: Move a build one step through the gate on the strength of a passed run.
+    target_object_type: SoftwareBuild
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [buildId, stage, testRunId]
+      properties:
+        buildId: {type: string, minLength: 1}
+        stage: {enum: [SIM_PASSED, BENCH_PASSED]}
+        # The run that earned the step. Kept with the execution and in the audit log.
+        testRunId: {type: string, minLength: 1}
+        note: {type: string}
+    edits:
+      - op: modify_object
+        object_type: SoftwareBuild
+        target: "{{ params.buildId }}"
+        assign:
+          status: "{{ params.stage }}"
+          statusNote: "{{ params.note }}"
+    policy_path: s2/actions/build_gate
+
   - api_name: clearBuildForFlight
     display_name: Clear build for flight
-    description: Release a build to fly. Needs a second person to approve, and agents cannot propose it.
+    description: Release a bench-passed build to fly. Needs a second person to approve, and agents cannot propose it.
     target_object_type: SoftwareBuild
     parameters:
       type: object
@@ -365,6 +392,7 @@ action_types:
           status: CLEARED_FOR_FLIGHT
           statusNote: "{{ params.justification }}"
     requires_approval: true
+    policy_path: s2/actions/build_gate
 
   - api_name: rejectBuild
     display_name: Reject build

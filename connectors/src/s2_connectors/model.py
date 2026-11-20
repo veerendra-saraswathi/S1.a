@@ -18,6 +18,11 @@ from typing import Any
 ADMIN = "admin"
 OPERATOR = "operator"
 
+# Which step of the build gate a passed run of each kind earns. A unit run earns none:
+# passing unit tests is what makes a build worth simulating, not evidence it flies. An
+# actuator bench exercises a part, not the build, and a flight comes after clearance.
+GATE_STAGE = {"SITL": "SIM_PASSED", "SIMULATION": "SIM_PASSED", "HILS": "BENCH_PASSED"}
+
 
 @dataclass(frozen=True)
 class Call:
@@ -30,6 +35,8 @@ class Call:
     idempotency_key: str | None = None
     headers: dict[str, str] | None = None
     tolerate_409: bool = False
+    # A 403 here is the build gate holding, which is an answer, not a failure.
+    tolerate_denied: bool = False
 
 
 @dataclass(frozen=True)
@@ -152,4 +159,35 @@ def record_verdict(run: Run, source: str) -> Call:
         # The verdict is part of the key, so a reporter that corrects a verdict sends a
         # new request rather than replaying the old one.
         idempotency_key=f"{run.testRunId}:recordTestVerdict:{run.verdict}",
+    )
+
+
+def advance_build(run: Run, source: str) -> Call | None:
+    """Ask for the gate step a passed run earns, or nothing when it earns none.
+
+    Whether the step is taken is the policy's call. A HILS pass on a build that has not
+    passed simulation is refused, and so is a second run asking for a step the build
+    already holds; S2 answers 403 with the reason, and the submission reports it and
+    carries on. The run's verdict has been recorded either way.
+    """
+    stage = GATE_STAGE.get(run.kind)
+    if stage is None or run.verdict != "PASS" or not run.buildId:
+        return None
+    return Call(
+        OPERATOR,
+        "POST",
+        "/v1/actions/advanceBuild/apply",
+        {
+            "parameters": {
+                "buildId": run.buildId,
+                "stage": stage,
+                "testRunId": run.testRunId,
+                "note": f"{run.testRunId} passed.",
+            },
+            "rationale": f"Advanced from {source}.",
+        },
+        # One request per build, stage and run: a re-submitted document replays, and a
+        # different run asking for the same step is a new request the policy answers.
+        idempotency_key=f"{run.buildId}:advanceBuild:{stage}:{run.testRunId}",
+        tolerate_denied=True,
     )

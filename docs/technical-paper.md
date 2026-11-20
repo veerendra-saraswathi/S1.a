@@ -83,13 +83,13 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 | The ontology pack is well-formed | Loaded with S2's schema classes; action checks replicated from S2's registry | Pass |
 | The seed requests are valid | Bodies validated with S2's request models; paths matched against the engine's route table | Pass |
 | The pack applies to a live engine | Applied to the Compose stack; object, link and action types registered | Pass |
-| The worked example runs end to end | 26 requests against a live engine: 9 objects, 11 links, three actions executed, and `baselineDocument` and `clearBuildForFlight` both held at 202 | Pass |
+| The worked example runs end to end | At pack 0.2.0, 26 requests against a live engine: 9 objects, 11 links, three actions executed, and `baselineDocument` and `clearBuildForFlight` both held at 202 | Pass |
 | The HILS connector writes a bench run into a live engine | The worked report submitted against the Compose stack: the run created, its build, drone and requirement linked, two anomalies raised with their windows, one attributed and one left open, the verdict recorded | Pass |
 | The build connector writes a CI build into a live engine | The worked record submitted against the Compose stack: the build created at BUILT, its metadata refreshed, one requirement implemented, and the unit and SITL runs written, linked and closed PASS | Pass |
 | A re-submitted build record cannot move a build backwards | The same record submitted again: the guarded create answered 409 and changed nothing, the PATCH refreshed the metadata without touching status, and the verdicts replayed | Pass |
 | Re-running the seed changes nothing twice | Second run: pack reported unchanged, objects replaced, links no-ops, the anomaly refused with 409, and one pending request per approval-gated action | Pass |
 
-**Not yet verified:** any run against a real autopilot or SITL; throughput, latency or resource use of the gateway; behaviour on a lossy link. The live-engine checks were made against S2's `phase2-action-executor` branch; the rest were made against its code.
+**Not yet verified:** the build gate, and the worked example since the gate changed it, against a live engine (the gate's policy is tested under OPA and its connectors against a stubbed engine); any run against a real autopilot or SITL; throughput, latency or resource use of the gateway; behaviour on a lossy link. The live-engine checks were made against S2's `phase2-action-executor` branch; the rest were made against its code.
 
 ## 7. Limitations and open questions
 
@@ -97,11 +97,7 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 2. **Contract stability.** S2 describes its telemetry contract as a placeholder. The gateway's mapping layer isolates the dependency, but the contract will change.
 3. **Schema coverage.** Module 1 datasets, Module 5 scenarios and GIS terrain are not yet modelled.
 4. **Authentication at the edge.** MAVLink signatures are not verified and the broker in S2's local stack has no access control.
-5. **The build gate is not expressible yet.** `SoftwareBuild` has five states, and
-   actions govern only two of them. A build reaches `BUILT` from a pipeline record, and
-   `CLEARED_FOR_FLIGHT` or `REJECTED` through an approval, but nothing moves it to
-   `SIM_PASSED` or `BENCH_PASSED` when a simulation or bench run passes. Until an action
-   does, the middle of the gate can only be written directly, which defeats the point.
+5. **The build gate trusts its evidence.** `advanceBuild` moves a build to `SIM_PASSED` and `BENCH_PASSED`, and a policy holds the order and refuses flight clearance to anything short of `BENCH_PASSED`. But S2 shows a policy the build and not the run a step names, so that the run passed and tested this build is the requester's claim, recorded and not checked. The gate has also not yet run against a live engine.
 6. **Open source and proprietary assets.** The integration layer and the generic model can be public. Flight software, customer telemetry and trained models cannot. The boundary between a public pack and a private, airframe-specific overlay is not yet defined.
 
 ## 8. Roadmap

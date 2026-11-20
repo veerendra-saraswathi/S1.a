@@ -7,16 +7,19 @@
 The example is a single thread through the traceability chain: a system requirement,
 the software requirement derived from it, the build that implements it, a simulation
 run that passes, a HILS run that fails, the anomaly found in it and the subsystem it is
-traced to. It asks for the requirements document to be baselined and for the build to be
-cleared for flight, and S2 holds both for a second person's approval.
+traced to. It asks for the requirements document to be baselined, which S2 holds for a
+second person's approval, and for the build to be cleared for flight, which S2 refuses:
+the build passed simulation and not the bench.
 
     uv run tools/seed-chain/seed.py              # against the local S2 Compose stack
     uv run tools/seed-chain/seed.py --dry-run    # print the requests, send nothing
 
 It needs S2's core-fleet pack and demo drones (`make seed` in the S2 repo) and uses the
 dev realm's users: `admin` defines and writes objects, `operator` requests actions.
-Running it again resets the example: objects are replaced, links are no-ops, the anomaly
-is kept, and neither approval request is duplicated.
+It also needs S2's OPA to be serving `policies/s2/actions/build_gate.rego`, which
+`make install-policy` copies into an S2 checkout. Running it again resets the example:
+objects are replaced, the build is advanced afresh, links are no-ops, the anomaly is
+kept, and the approval request is not duplicated.
 """
 
 from __future__ import annotations
@@ -56,7 +59,7 @@ OBJECTS: list[tuple[str, str, dict[str, Any]]] = [
     }),
     ("SoftwareBuild", "BLD-FC-2026.11.3", {
         "name": "Flight software 2026.11.3", "target": "FLIGHT", "gitCommit": "9be03d7",
-        "artifactDigest": "sha256:" + "0" * 64, "builtAt": "2026-11-17T09:30:00Z", "status": "SIM_PASSED",
+        "artifactDigest": "sha256:" + "0" * 64, "builtAt": "2026-11-17T09:30:00Z", "status": "BUILT",
     }),
     ("Subsystem", "SUB-DRN1-GIMBAL", {
         "name": "Stabilised camera gimbal", "kind": "PAYLOAD", "partNumber": "GMB-3X-200",
@@ -92,7 +95,11 @@ LINKS: list[tuple[str, str, str, str]] = [
 
 # Actions that wait for approval, and the parameter naming their subject. The key built
 # from these keeps a re-run to one pending request per subject instead of a new one each time.
-APPROVAL_SUBJECT = {"baselineDocument": "documentId", "clearBuildForFlight": "buildId"}
+APPROVAL_SUBJECT = {"baselineDocument": "documentId"}
+
+# Refused by the build gate's policy, on purpose. A refusal creates no request, so this
+# one needs no key: there is nothing for a re-run to duplicate.
+EXPECTED_REFUSAL = "clearBuildForFlight"
 
 # (action, parameters), requested in order by the operator.
 ACTIONS: list[tuple[str, dict[str, Any]]] = [
@@ -114,9 +121,16 @@ ACTIONS: list[tuple[str, dict[str, Any]]] = [
     ("recordTestVerdict", {
         "testRunId": "TR-HILS-0057", "verdict": "FAIL", "note": "One confirmed gimbal anomaly, see ANM-0057-01.",
     }),
+    # The build was written at BUILT; the simulation run that passed earns it one step.
+    ("advanceBuild", {
+        "buildId": "BLD-FC-2026.11.3", "stage": "SIM_PASSED", "testRunId": "TR-SIM-0142",
+        "note": "TR-SIM-0142 passed.",
+    }),
+    # The HILS run failed, so the build never reached BENCH_PASSED and S2 refuses even
+    # the request. The build connector's example, 2026.11.4, is the one that gets through.
     ("clearBuildForFlight", {
         "buildId": "BLD-FC-2026.11.3",
-        "justification": "Seed example: shows the approval gate. Reject it, the HILS run failed.",
+        "justification": "Seed example: shows the build gate refusing a build that failed the bench.",
     }),
 ]
 
@@ -204,8 +218,14 @@ def main() -> None:
                 # the anomaly already existing; anything else shows in the text printed here.
                 print(f"409 {method} {path}  not raised again: {response.text[:160]}")
                 continue
+            if response.status_code == 403 and action == EXPECTED_REFUSAL:
+                reasons = response.json().get("detail", {}).get("reasons") or [response.text[:160]]
+                print(f"403 {method} {path}  refused by the build gate: {'; '.join(reasons)}")
+                continue
             if response.status_code >= 400:
                 hint = ""
+                if response.status_code == 403 and action == "advanceBuild":
+                    hint = "\nif no reason is given, S2's OPA is not serving build_gate.rego: run `make install-policy`."
                 if response.status_code == 404 and DRONE in json.dumps(body):
                     hint = f"\n{DRONE} is missing: run `make seed` in the S2 repo first."
                 sys.exit(f"{method} {path} -> {response.status_code}\n{response.text}{hint}")
@@ -218,9 +238,9 @@ def main() -> None:
             print(f"{response.status_code} {method} {path}{note}")
 
     print(
-        "\nSeeded. Two requests wait in S2's Approvals queue for `approver` to decide:\n"
+        "\nSeeded. One request waits in S2's Approvals queue for `approver` to decide:\n"
         "  baselineDocument  DOC-SYSRS-001 rev B   approve it, the review is done\n"
-        "  clearBuildForFlight  BLD-FC-2026.11.3   reject it, the HILS run failed\n"
+        "BLD-FC-2026.11.3 stands at SIM_PASSED, and its flight clearance was refused: the HILS run failed.\n"
         "Try:  GET /v1/objects/Requirement/SYS-NAV-012/links/verifiedBy"
     )
 

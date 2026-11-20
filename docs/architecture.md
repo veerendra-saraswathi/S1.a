@@ -139,10 +139,13 @@ State that matters changes only through named actions. S2 validates the paramete
 | `raiseAnomaly` | Creates an anomaly linked to its test run | No | No |
 | `attributeAnomaly` | Confirms an anomaly, links the subsystem, records root cause | No | No |
 | `baselineDocument` | Marks a document revision as the baseline | Yes | May propose |
-| `clearBuildForFlight` | Releases a build to fly | Yes, by a second person | No |
+| `advanceBuild` | Moves a build one step through the gate, naming the run that earned it | No | No |
+| `clearBuildForFlight` | Releases a bench-passed build to fly | Yes, by a second person | No |
 | `rejectBuild` | Marks a build as not to be used | No | No |
 
 S2's baseline policy applies to all of them: requesting needs the `operator` role, approving needs the `approver` role, and the requester cannot approve their own request.
+
+`advanceBuild` and `clearBuildForFlight` carry a policy of their own, `policies/s2/actions/build_gate.rego`, on top of the baseline. It holds the order `BUILT`, `SIM_PASSED`, `BENCH_PASSED`: a step is allowed only from the state before it, and clearance can be requested and approved only for a `BENCH_PASSED` build. S2 decides again at approval, so a build rejected while its clearance waited cannot be cleared by a late approval.
 
 ## 7. Deployment
 
@@ -163,10 +166,11 @@ S2's baseline policy applies to all of them: requesting needs the `operator` rol
 
 1. Source-timestamped telemetry for bench use: PTP clock, per-signal rates above 1 Hz.
 2. CAN gateway for bench buses.
-3. Orchestrated build gate: simulation pass, bench pass, flight clearance. This needs an
-   action in the pack first: `SoftwareBuild.status` can reach `CLEARED_FOR_FLIGHT` and
-   `REJECTED` through actions and `BUILT` from a build record, but nothing advances a
-   build to `SIM_PASSED` or `BENCH_PASSED` when a run passes.
+3. The build gate against a live engine. `advanceBuild`, its policy and the connectors
+   that drive it are built and tested without one.
+4. Evidence the policy can check: S2 passing a policy the run a gate step names, so
+   "this run passed and tested this build" stops being the requester's claim.
 
-The bench and build connectors are built; see their [README](../connectors/README.md).
-What they wait on is a bench and a pipeline to write the documents they read.
+The bench and build connectors and the build gate are built; see the connectors'
+[README](../connectors/README.md). What the connectors wait on is a bench and a pipeline
+to write the documents they read.

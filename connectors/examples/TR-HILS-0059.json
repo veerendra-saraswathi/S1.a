@@ -1,0 +1,17 @@
+{
+  "contract": "s2.bench-report/v1",
+  "run": {
+    "testRunId": "TR-HILS-0059",
+    "name": "HILS endurance, build 2026.11.4",
+    "kind": "HILS",
+    "bench": "HILS bench 2",
+    "startedAt": "2026-11-20T06:05:00Z",
+    "endedAt": "2026-11-20T07:17:00Z",
+    "verdict": "PASS",
+    "verdictNote": "72 minutes with no anomaly flagged. Gimbal pitch response within the twin's envelope after the bearing change.",
+    "logUri": "s3://s2-bench-logs/TR-HILS-0059/",
+    "buildId": "BLD-FC-2026.11.4",
+    "droneKey": "DRN-0001",
+    "verifies": ["SYS-NAV-012"]
+  }
+}

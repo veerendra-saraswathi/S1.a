@@ -11,6 +11,7 @@ from s2_connectors.model import (
     Anomaly,
     Call,
     Run,
+    advance_build,
     attribute_anomaly,
     raise_anomaly,
     record_verdict,
@@ -53,7 +54,9 @@ def plan(report: BenchReport) -> list[Call]:
     """Every call this report becomes, in the order it is sent.
 
     Anomalies are raised before the verdict is recorded, so the verdict can refer to
-    them and a closed run is never left with its anomalies still missing.
+    them and a closed run is never left with its anomalies still missing. A HILS run
+    that passed then asks for the build's bench step, last, so the gate is only ever
+    asked about a run whose verdict is already on record.
     """
     run, source = report.run, report.source
     calls = [run_write(run), *run_links(run)]
@@ -62,4 +65,7 @@ def plan(report: BenchReport) -> list[Call]:
         if anomaly.attributed:
             calls.append(attribute_anomaly(anomaly, source))
     calls.append(record_verdict(run, source))
+    step = advance_build(run, source)
+    if step:
+        calls.append(step)
     return calls

@@ -6,8 +6,8 @@ actions.
 
 | Connector | Reads | Contract | Writes |
 |---|---|---|---|
-| `hils-submit` | A HILS or actuator bench run | `s2.bench-report/v1` | `TestRun`, its links, `Anomaly` objects, the verdict |
-| `build-submit` | A CI pipeline build | `s2.build-record/v1` | `SoftwareBuild`, `implements` links, the unit and SITL runs with their verdicts |
+| `hils-submit` | A HILS or actuator bench run | `s2.bench-report/v1` | `TestRun`, its links, `Anomaly` objects, the verdict, and the build's bench step when a HILS run passes |
+| `build-submit` | A CI pipeline build | `s2.build-record/v1` | `SoftwareBuild`, `implements` links, the unit and SITL runs with their verdicts, and the build's simulation step when all of them pass |
 
 Together they are the two ends of the chain a drone company has to keep: what was built,
 and how it behaved on hardware.
@@ -24,7 +24,12 @@ make submit-bench REPORT=runs/TR-HILS-0061.json
 make submit-build-dry
 make submit-build
 make submit-build RECORD=builds/BLD-FC-2026.11.5.json
+
+make gate
 ```
+
+`make gate` submits the worked build record and then `examples/TR-HILS-0059.json`, a HILS
+run that passed, which takes build 2026.11.4 from recorded to bench passed.
 
 Directly:
 
@@ -34,8 +39,10 @@ uv run --project connectors build-submit RECORD.json [--api URL] [--dry-run]
 ```
 
 Apply the ontology pack first (`make seed` at the root). The connectors need the
-`drone-engineering` pack at **0.2.0 or later**, the version that added the anomaly
-window to `raiseAnomaly`.
+`drone-engineering` pack at **0.3.0 or later**, the version that added `advanceBuild`,
+and S2's OPA must be serving `policies/s2/actions/build_gate.rego`. `make seed` does both:
+it copies the policy into the S2 checkout at `S2_DIR` (`../S2` unless set) and applies
+the pack.
 
 ## The contracts
 
@@ -75,6 +82,30 @@ with its anomalies missing, and the verdict note can refer to them.
 run. S2 shows it to an approver and keeps it in the audit log, which is the only reason
 an auditor can get from a state change back to the bench or the pipeline that caused it.
 
+## The build gate
+
+A build moves `BUILT` → `SIM_PASSED` → `BENCH_PASSED`, and only then can
+`clearBuildForFlight` be requested. Each step is the `advanceBuild` action, asked for by
+the connector that saw the run pass:
+
+| Document | Asks for | When |
+|---|---|---|
+| Build record | `SIM_PASSED` | It holds a passed `SITL` or `SIMULATION` run and no run in it failed or was inconclusive |
+| Bench report | `BENCH_PASSED` | Its run is `HILS`, passed, and names a build |
+
+Unit runs earn nothing by themselves, an actuator bench exercises a part and not the
+build, and a flight comes after clearance.
+
+**The connector asks; the policy decides.** A connector cannot know what state a build is
+in, and should not: `policies/s2/actions/build_gate.rego` allows a step only from the
+state before it. A HILS pass on a build that never passed simulation is refused, as is a
+second run asking for a step already taken. S2 answers 403 with the reason, the
+connector prints it as `gate held` and exits 0: the verdict was recorded, and the gate
+holding is an answer, not a failure.
+
+**The step is asked for last**, after every verdict in the document is recorded, so the
+gate is never asked about a run whose verdict is not yet in S2.
+
 ## Re-submitting
 
 Benches and pipelines re-send. Every action carries an `Idempotency-Key`, so a second
@@ -84,24 +115,32 @@ when the anomaly exists and nothing changed — is reported and stepped over.
 The verdict's key includes the verdict itself, so a reporter that *corrects* a verdict
 sends a new request rather than replaying the old one.
 
+A gate step's key is the build, the stage and the run, so a re-sent document replays its
+own step and never asks twice.
+
 ## Tests
 
 ```bash
 make test-connectors
 ```
 
-44 tests over contract validation, both mappings, and the submission behaviour against a
-stubbed engine.
+63 tests over contract validation, both mappings, the build gate, and the submission
+behaviour against a stubbed engine. `make test-policy` runs the gate's 21 policy tests,
+and needs `opa` and an S2 checkout for the baseline rules they build on.
 
 ## Known limits
 
-- **`SIM_PASSED` and `BENCH_PASSED` cannot be set.** `SoftwareBuild.status` has five
-  states; actions exist for `CLEARED_FOR_FLIGHT` and `REJECTED`, and a build record
-  creates one at `BUILT`. Nothing advances a build when a simulation or bench run passes,
-  so those two states are reachable only by writing them directly, which is the thing
-  these connectors avoid. That transition is the orchestrated build gate in
-  `docs/architecture.md` §9, and it needs an action in the pack before a connector can
-  drive it.
+- **The gate has not run against a live engine.** The policy is tested under OPA and the
+  connectors against a stubbed engine; `make seed` and `make gate` on a running stack
+  are the check still owed.
+- **The policy cannot see the evidence.** S2 shows a policy the build, not the run named
+  in `testRunId`. That the run passed and tested this build is the connector's claim,
+  kept in the audit log. Checking it in the policy needs S2 to pass linked objects in.
+- **The policy lives in this repository and is served from S2's.** A pack cannot carry a
+  policy yet, so `make install-policy` copies the file across. Until it is there every
+  gate request is denied, which is the safe way round and an easy one to trip over.
+- **A failed run does not move a build back.** A build that reached `BENCH_PASSED` and
+  then fails a later bench run stays where it is; `rejectBuild` is a person's call.
 - **Object writes carry no provenance.** S2's `ObjectWrite` accepts a `provenance` block,
   but it is shaped for the lakehouse — a dataset path and a numeric Iceberg snapshot id —
   and a CI pipeline has neither. Actions carry the source in their rationale instead. A

@@ -69,6 +69,10 @@ bench, a rig or a pipeline that does not exist yet — not on S1.a.
    proposed by an AI agent and must be approved by a person. Clearing a build for flight
    needs a second person and is closed to agents entirely. Every request, approval and
    refusal lands in a tamper-evident log.
+5. **Makes a build earn its clearance.** A build moves from built, to simulation passed,
+   to bench passed, one step at a time, each step taken when a run passes and naming
+   that run. Clearance for flight cannot even be requested for a build that has not
+   passed the bench: the policy refuses it and says why.
 
 ## Where it sits
 
@@ -101,13 +105,13 @@ their object types, link types and actions defined and are waiting on the module
 | Component | Path | State |
 |---|---|---|
 | MAVLink gateway | `gateways/mavlink-gateway` | Built. Parser tested against pymavlink; output validated against S2's contract code; MQTT tested against a broker, including reconnect |
-| Drone engineering ontology | `ontologies/drone-engineering` | Applied to a live S2 engine: 6 object types, 9 link types and 6 actions |
+| Drone engineering ontology | `ontologies/drone-engineering` | 6 object types, 9 link types and 7 actions. Version 0.2.0 was applied to a live S2 engine; 0.3.0, which adds the build gate, has not been yet |
 | HILS bench connector | `connectors` | Built. Bench report contract v1, and a report written into a live engine end to end |
 | Build provenance connector | `connectors` | Built. Build record contract v1, and a record written into a live engine end to end |
-| Worked example | `tools/seed-chain` | Runs end to end against a live engine, and is safe to re-run |
+| Build gate | `policies`, `connectors` | Built. `advanceBuild` and its policy; both connectors ask for the step a passed run earns. Policy tested under OPA, connectors against a stubbed engine. Not yet run against a live engine |
+| Worked example | `tools/seed-chain` | Ran end to end against a live engine at pack 0.2.0, and is safe to re-run. Not re-run since the gate changed it |
 | MAVLink simulator | `tools/mavlink-sim` | Built |
 | CAN and simulator connectors | | Planned |
-| Workflow orchestration of the build gate | | Planned |
 
 ## What has been verified
 
@@ -117,13 +121,17 @@ their object types, link types and actions defined and are waiting on the module
 | It survives fragmentation, noise and corruption | A multi-frame stream fed one byte at a time with leading garbage; a flipped payload byte |
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own validator |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
-| The worked example runs end to end | 26 requests against a live engine, with both approval gates held awaiting a second person |
+| The worked example runs end to end | At pack 0.2.0: 26 requests against a live engine, with both approval gates held awaiting a second person |
 | A bench report becomes a test run | Submitted live: the run created and linked, two anomalies raised with their windows, one attributed, the verdict recorded |
 | A build record becomes a build | Submitted live: the build created, its metadata refreshed, one requirement implemented, unit and SITL runs closed `PASS` |
 | Re-submission changes nothing twice | Second submissions of both documents: duplicates refused, approval requests replayed, no build dragged backwards |
+| The gate's policy allows only the next step | 21 policy tests under OPA 1.20.2 with S2's baseline rules: every out-of-order step, every status but `BENCH_PASSED` at clearance, a late approval of a rejected build, missing input |
+| The connectors ask for the right step | Tests against a stubbed engine: a passed SITL run asks for `SIM_PASSED`, a passed HILS run for `BENCH_PASSED`, a record with any failure asks for nothing, and a refusal is reported without failing the submission |
 
-**Not verified:** any run against a real autopilot or SITL; throughput, latency or
-resource use; behaviour on a lossy link. [The technical paper](docs/technical-paper.md)
+**Not verified:** the build gate against a live engine, and the worked example since the
+gate changed it (27 requests now, one approval held and one clearance refused); any run
+against a real autopilot or SITL; throughput, latency or resource use; behaviour on a
+lossy link. [The technical paper](docs/technical-paper.md)
 §6 is the full table and §7 the open questions.
 
 ## Tech stack
@@ -133,6 +141,7 @@ resource use; behaviour on a lossy link. [The technical paper](docs/technical-pa
 | Gateway | Go 1.22, standard library only | One static binary. No module downloads, so it builds on an air-gapped host |
 | Field protocols | MAVLink v1 and v2, MQTT 3.1.1 at QoS 0, JSON | What autopilots speak and what S2's ingestion contract expects |
 | Ontology | YAML pack, JSON Schema 2020-12 | Object, link and action types as reviewable code |
+| Policy | Rego, served by S2's Open Policy Agent | Whether a build may take a step is a rule about the state of the world, which is what S2 gives a policy and not an action |
 | Connectors | Python 3.13, httpx, jsonschema, uv | Off the telemetry path, where a verdict must not be lost but a second does not matter |
 | Platform | S2: PostgreSQL with PostGIS, TimescaleDB, Kafka, Mosquitto, OPA, Keycloak | Supplied by S2, not deployed from this repository |
 
@@ -158,8 +167,12 @@ With an S2 stack running locally (`make up` in the S2 repo):
 make seed
 make run
 make submit-bench
-make submit-build
+make gate
 ```
+
+`make seed` first copies the build gate's policy into the S2 checkout it expects beside
+this one (`S2_DIR=../S2`), where S2's OPA picks it up. `make gate` then walks build
+2026.11.4 through: recorded, simulation passed, bench passed.
 
 Stop S2's own telemetry simulator first, or both will write to the same drones. `make
 help` lists every target. Gateway flags, published metrics and known limits are in the

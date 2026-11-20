@@ -84,6 +84,7 @@ def test_the_sequence_the_worked_example_becomes():
         ("admin", "POST", "/v1/objects/TestRun/TR-SITL-2026.11.4/links/ranOn"),
         ("admin", "POST", "/v1/objects/TestRun/TR-SITL-2026.11.4/links/verifies"),
         ("operator", "POST", "/v1/actions/recordTestVerdict/apply"),
+        ("operator", "POST", "/v1/actions/advanceBuild/apply"),
     ]
 
 
