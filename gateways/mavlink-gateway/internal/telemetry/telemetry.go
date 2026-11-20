@@ -8,6 +8,13 @@
 // MAVLink arrives at tens of messages per second per vehicle. The aggregator
 // keeps the latest value of each metric and emits one message per vehicle per
 // flush, so the publish rate is set by the caller, not by the autopilot.
+//
+// ts is source time: when the newest timed sample in the message (ATTITUDE or
+// GLOBAL_POSITION_INT) was taken on the vehicle, mapped to UTC by the vehicle's
+// clock (package clock). Every message says how in the clock_source metric
+// (gnss, estimated or gateway), and carries clock_offset_ms, the vehicle's UTC
+// minus the gateway's, whenever SYSTEM_TIME makes that measurable. A message with
+// no timed sample is stamped with the gateway's arrival time and says so.
 package telemetry
 
 import (
@@ -17,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/clock"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/mavlink"
 )
 
@@ -54,6 +62,14 @@ type vehicle struct {
 	metrics  map[string]any
 	position *Position
 	seq      uint64
+
+	clock clock.Clock
+	// Since the last flush: the newest timed sample, on the vehicle's clock, and
+	// the newest arrival of anything, on the gateway's.
+	sampled     bool
+	sampleBoot  uint32
+	lastArrival time.Time
+	reboots     uint64
 }
 
 // Aggregator is safe for concurrent use.
@@ -77,8 +93,9 @@ func (a *Aggregator) ObjectKey(sysID uint8) string {
 	return fmt.Sprintf("MAV-%d", sysID)
 }
 
-// Apply records what one frame says about its vehicle.
-func (a *Aggregator) Apply(f mavlink.Frame) {
+// Apply records what one frame says about its vehicle. arrival is when the
+// gateway received it, on the gateway's clock.
+func (a *Aggregator) Apply(f mavlink.Frame, arrival time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -88,6 +105,7 @@ func (a *Aggregator) Apply(f mavlink.Frame) {
 			return // ground station, gimbal or companion computer, not a vehicle
 		}
 		v := a.vehicle(f.SysID)
+		v.arrived(arrival)
 		v.metrics["armed"] = hb.Armed()
 		v.metrics["custom_mode"] = float64(hb.CustomMode)
 		v.metrics["system_state"] = mavlink.SystemState(hb.SystemStatus)
@@ -96,6 +114,11 @@ func (a *Aggregator) Apply(f mavlink.Frame) {
 
 	v := a.vehicle(f.SysID)
 	switch f.MsgID {
+	case mavlink.MsgSystemTime:
+		st := mavlink.DecodeSystemTime(f.Payload)
+		v.observe(st.BootMs, arrival)
+		v.clock.SystemTime(st.UnixUsec, st.BootMs, arrival)
+		return // carries no metric of its own; not a reason to publish
 	case mavlink.MsgSysStatus:
 		s := mavlink.DecodeSysStatus(f.Payload)
 		v.set("cpu_load_pct", s.LoadPct)
@@ -114,6 +137,7 @@ func (a *Aggregator) Apply(f mavlink.Frame) {
 		v.setPtr("gps_hdop", g.HDOP)
 	case mavlink.MsgAttitude:
 		at := mavlink.DecodeAttitude(f.Payload)
+		v.sample(at.BootMs, arrival)
 		v.set("roll_deg", at.RollDeg)
 		v.set("pitch_deg", at.PitchDeg)
 		v.set("yaw_deg", at.YawDeg)
@@ -123,6 +147,7 @@ func (a *Aggregator) Apply(f mavlink.Frame) {
 		v.set("throttle_pct", h.ThrottlePct)
 	case mavlink.MsgGlobalPositionInt:
 		g := mavlink.DecodeGlobalPositionInt(f.Payload)
+		v.sample(g.BootMs, arrival)
 		v.set("rel_alt_m", g.RelAltM)
 		v.set("climb_rate_mps", g.ClimbMps)
 		// An autopilot without a fix reports 0,0. Do not plot that in the Gulf of Guinea.
@@ -131,11 +156,12 @@ func (a *Aggregator) Apply(f mavlink.Frame) {
 			v.position = &Position{Lat: g.LatDeg, Lon: g.LonDeg, AltM: &alt, HeadingDeg: g.HeadingDeg, SpeedMps: &speed}
 		}
 	}
+	v.arrived(arrival)
 }
 
 // Flush returns one message for every vehicle that reported something since the
-// previous flush, ordered by system id, and clears what it returned. The
-// timestamp is the gateway's clock: MAVLink's time_boot_ms is not wall time.
+// previous flush, ordered by system id, and clears what it returned. now is the
+// gateway's clock, used to judge whether a vehicle's clock anchor is still fresh.
 func (a *Aggregator) Flush(now time.Time) []Outbound {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -146,7 +172,6 @@ func (a *Aggregator) Flush(now time.Time) []Outbound {
 	}
 	sort.Ints(ids)
 
-	ts := now.UTC().Format("2006-01-02T15:04:05.000Z")
 	var out []Outbound
 	for _, id := range ids {
 		v := a.vehicles[uint8(id)]
@@ -154,11 +179,21 @@ func (a *Aggregator) Flush(now time.Time) []Outbound {
 			continue
 		}
 		v.seq++
+		ts, source := v.lastArrival, clock.Gateway
+		if v.sampled {
+			if utc, s, ok := v.clock.At(v.sampleBoot, now); ok {
+				ts, source = utc, s
+			}
+		}
+		v.metrics["clock_source"] = string(source)
+		if offset, ok := v.clock.Offset(now); ok {
+			v.metrics["clock_offset_ms"] = math.Round(float64(offset.Microseconds())/100) / 10
+		}
 		out = append(out, Outbound{
 			Topic:   fmt.Sprintf("s2/v1/%s/%s/%s/telemetry", a.cfg.TenantID, a.cfg.ObjectType, a.ObjectKey(uint8(id))),
-			Message: Message{TS: ts, Metrics: v.metrics, Position: v.position, Seq: v.seq},
+			Message: Message{TS: ts.UTC().Format(timeLayout), Metrics: v.metrics, Position: v.position, Seq: v.seq},
 		})
-		v.metrics, v.position = make(map[string]any), nil
+		v.metrics, v.position, v.sampled = make(map[string]any), nil, false
 	}
 	return out
 }
@@ -170,6 +205,45 @@ func (a *Aggregator) vehicle(sysID uint8) *vehicle {
 		a.vehicles[sysID] = v
 	}
 	return v
+}
+
+// timeLayout is RFC 3339 in UTC with milliseconds, the resolution of time_boot_ms.
+const timeLayout = "2006-01-02T15:04:05.000Z"
+
+// Reboots is how many autopilot reboots the gateway has seen, per system id.
+func (a *Aggregator) Reboots() map[uint8]uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make(map[uint8]uint64)
+	for id, v := range a.vehicles {
+		if v.reboots > 0 {
+			out[id] = v.reboots
+		}
+	}
+	return out
+}
+
+// observe feeds a boot time to the vehicle's clock. After a reboot, the sample
+// held from before it belongs to the old boot, and is dropped.
+func (v *vehicle) observe(bootMs uint32, arrival time.Time) {
+	if v.clock.Observe(bootMs, arrival) {
+		v.reboots++
+		v.sampled = false
+	}
+}
+
+// sample records a timed sample; the newest one sets the message's ts.
+func (v *vehicle) sample(bootMs uint32, arrival time.Time) {
+	v.observe(bootMs, arrival)
+	if !v.sampled || bootMs > v.sampleBoot {
+		v.sampleBoot, v.sampled = bootMs, true
+	}
+}
+
+func (v *vehicle) arrived(arrival time.Time) {
+	if arrival.After(v.lastArrival) {
+		v.lastArrival = arrival
+	}
 }
 
 // set stores a number, ignoring NaN and infinities: JSON cannot carry them and

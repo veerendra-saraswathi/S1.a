@@ -9,6 +9,7 @@ import (
 const (
 	MsgHeartbeat         uint32 = 0
 	MsgSysStatus         uint32 = 1
+	MsgSystemTime        uint32 = 2
 	MsgGPSRawInt         uint32 = 24
 	MsgAttitude          uint32 = 30
 	MsgGlobalPositionInt uint32 = 33
@@ -28,6 +29,7 @@ type definition struct {
 var definitions = map[uint32]definition{
 	MsgHeartbeat:         {50, 9},
 	MsgSysStatus:         {124, 31},
+	MsgSystemTime:        {137, 12},
 	MsgGPSRawInt:         {24, 30},
 	MsgAttitude:          {39, 28},
 	MsgGlobalPositionInt: {104, 28},
@@ -96,6 +98,17 @@ func DecodeSysStatus(p []byte) SysStatus {
 	return s
 }
 
+// SystemTime is SYSTEM_TIME (#2): the autopilot's UTC against its boot clock.
+// UnixUsec is 0 when the autopilot has no time source (usually no GNSS fix yet).
+type SystemTime struct {
+	UnixUsec uint64
+	BootMs   uint32
+}
+
+func DecodeSystemTime(p []byte) SystemTime {
+	return SystemTime{UnixUsec: le.Uint64(p[0:]), BootMs: le.Uint32(p[8:])}
+}
+
 // GPSRawInt is the part of GPS_RAW_INT (#24) the gateway uses.
 type GPSRawInt struct {
 	FixType    uint8
@@ -114,16 +127,21 @@ func DecodeGPSRawInt(p []byte) GPSRawInt {
 	return g
 }
 
-// Attitude is ATTITUDE (#30), converted to degrees.
-type Attitude struct{ RollDeg, PitchDeg, YawDeg float64 }
+// Attitude is ATTITUDE (#30), converted to degrees, sampled at BootMs on the
+// autopilot's clock.
+type Attitude struct {
+	BootMs                    uint32
+	RollDeg, PitchDeg, YawDeg float64
+}
 
 func DecodeAttitude(p []byte) Attitude {
 	const deg = 180 / math.Pi
-	return Attitude{RollDeg: f32(p[4:]) * deg, PitchDeg: f32(p[8:]) * deg, YawDeg: f32(p[12:]) * deg}
+	return Attitude{BootMs: le.Uint32(p[0:]), RollDeg: f32(p[4:]) * deg, PitchDeg: f32(p[8:]) * deg, YawDeg: f32(p[12:]) * deg}
 }
 
 // GlobalPositionInt is GLOBAL_POSITION_INT (#33) in SI units.
 type GlobalPositionInt struct {
+	BootMs         uint32 // sample time on the autopilot's clock
 	LatDeg, LonDeg float64
 	AltMSLm        float64
 	RelAltM        float64
@@ -137,6 +155,7 @@ func DecodeGlobalPositionInt(p []byte) GlobalPositionInt {
 	vy := float64(int16(le.Uint16(p[22:]))) / 100
 	vz := float64(int16(le.Uint16(p[24:]))) / 100 // NED: positive down
 	g := GlobalPositionInt{
+		BootMs:         le.Uint32(p[0:]),
 		LatDeg:         float64(int32(le.Uint32(p[4:]))) / 1e7,
 		LonDeg:         float64(int32(le.Uint32(p[8:]))) / 1e7,
 		AltMSLm:        float64(int32(le.Uint32(p[12:]))) / 1000,

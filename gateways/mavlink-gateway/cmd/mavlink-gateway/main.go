@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -96,6 +97,7 @@ func main() {
 		buf := make([]byte, 65535)
 		for {
 			n, _, err := conn.ReadFrom(buf)
+			arrival := time.Now()
 			if err != nil {
 				if !errors.Is(err, net.ErrClosed) {
 					log.Printf("udp read: %v", err)
@@ -104,7 +106,7 @@ func main() {
 			}
 			parser.Reset() // a datagram holds whole frames; never join two datagrams
 			for _, frame := range parser.Write(buf[:n]) {
-				agg.Apply(frame)
+				agg.Apply(frame, arrival)
 			}
 			snapshot := parser.Stats
 			stats.Store(&snapshot)
@@ -152,10 +154,28 @@ func main() {
 			}
 		case <-report.C:
 			s := stats.Load()
-			log.Printf("mavlink frames=%d bad_crc=%d undecoded=%d dropped=%d garbage_bytes=%d | mqtt published=%d failed=%d",
-				s.Frames, s.BadCRC, s.Unknown, s.Dropped, s.Garbage, published, failed)
+			log.Printf("mavlink frames=%d bad_crc=%d undecoded=%d dropped=%d garbage_bytes=%d | mqtt published=%d failed=%d%s",
+				s.Frames, s.BadCRC, s.Unknown, s.Dropped, s.Garbage, published, failed, reboots(agg))
 		}
 	}
+}
+
+// reboots lists autopilots seen rebooting, e.g. " | reboots 2=1", or nothing.
+func reboots(agg *telemetry.Aggregator) string {
+	seen := agg.Reboots()
+	if len(seen) == 0 {
+		return ""
+	}
+	ids := make([]int, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, int(id))
+	}
+	sort.Ints(ids)
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = fmt.Sprintf("%d=%d", id, seen[uint8(id)])
+	}
+	return " | reboots " + strings.Join(parts, ",")
 }
 
 func target(dryRun bool, mqttURL string) string {

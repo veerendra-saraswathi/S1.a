@@ -164,8 +164,9 @@ S2's baseline policy applies to all of them: requesting needs the `operator` rol
 
 ## 9. Planned work
 
-1. Source-timestamped telemetry for bench use: PTP clock, per-signal rates above 1 Hz.
-2. CAN gateway for bench buses.
+1. CAN gateway for bench buses.
+2. A PTP-disciplined clock for bench subsystems, for sub-millisecond agreement between
+   them. The MAVLink gateway already stamps telemetry with source time (its README).
 3. Durable orchestration of the build gate, from simulation to bench to an approval
    request.
 

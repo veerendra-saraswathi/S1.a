@@ -48,7 +48,9 @@ Sentinel values are removed at this stage: battery fields the autopilot reports 
 
 ### 4.3 Timestamps
 
-MAVLink's `time_boot_ms` counts from autopilot boot and is not wall-clock time. The gateway stamps each message with its own clock at emission. At 1 Hz this error is small relative to the interval. It is not adequate for the bench use cases in M2 and M6, where signals from several subsystems must be aligned to the millisecond. That requires timestamps taken at the source against a synchronised clock, and is future work.
+MAVLink's `time_boot_ms` counts from autopilot boot and is not wall-clock time. The gateway keeps a clock per vehicle that puts it on UTC, and stamps each message with when its newest timed sample was taken on the vehicle. The boot epoch comes from SYSTEM_TIME, which pairs the autopilot's GNSS-derived UTC with `time_boot_ms`; without it, from the minimum of arrival minus `time_boot_ms` over a ten-second window, which keeps the samples' spacing exact and puts them on the gateway's clock. Each message names its clock source (`gnss`, `estimated` or `gateway`), and carries the vehicle-to-ground offset whenever SYSTEM_TIME makes it measurable. A backwards step in `time_boot_ms` is a reboot and resets the clock. The gateway cannot use MAVLink TIMESYNC, because that needs it to transmit.
+
+This gives one vehicle's signals millisecond alignment, and several vehicles alignment to the accuracy of their GNSS time. It does not give sub-millisecond agreement between separate bench subsystems in M2 and M6; that needs the subsystems on one PTP-disciplined clock, and stays future work.
 
 ### 4.4 Delivery
 
@@ -79,6 +81,8 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 | Corrupt frames are rejected | A flipped payload byte; the following frame must still parse | Pass |
 | Signed and incompatible v2 frames are handled | Constructed frames with the relevant flags | Pass |
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own `envelope_from_mqtt` | All messages valid |
+| Messages carry source time at 10 Hz | Three simulated drones whose clocks run 250, 500 and 750 ms ahead, through the gateway at 10 Hz for 12 s: 120 messages each at 10.1 Hz, every one `gnss`, offsets measured at 249.9, 500.0 and 750.0 ms, spacing 94-104 ms, none backwards, all valid under S2's `envelope_from_mqtt`. Without SYSTEM_TIME, every message `estimated` | Pass |
+| Source time survives the S2 pipeline | 8 s of the same run published to the broker: TimescaleDB holds 80 positions per drone at 10.0 Hz, keyed by vehicle time, with the offsets stored. Ingest minus source time was 804, 554 and 304 ms, which with each drone's skew gives one pipeline latency, 1,054 ms | Pass |
 | MQTT publishing works and recovers | Published to a broker, broker stopped and restarted, publishing resumed | Pass |
 | The ontology pack is well-formed | Loaded with S2's schema classes; action checks replicated from S2's registry | Pass |
 | The seed requests are valid | Bodies validated with S2's request models; paths matched against the engine's route table | Pass |
@@ -107,7 +111,7 @@ Six actions change state. Four are routine. `baselineDocument` requires approval
 
 ## 8. Roadmap
 
-Next, in order: add source-timestamped, higher-rate telemetry for bench use; add CAN; then orchestrate the build gate as a durable workflow that advances a build from simulation to bench to an approval request.
+Next, in order: add CAN; then orchestrate the build gate as a durable workflow that advances a build from simulation to bench to an approval request.
 
 ## References
 

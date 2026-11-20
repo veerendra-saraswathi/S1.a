@@ -91,7 +91,7 @@ write, and what it is still waiting for.
 | Module | What it produces | What S1.a carries today | Still needed |
 |---|---|---|---|
 | **M1** GNSS-denied night navigation | Flight datasets, position estimates, flight trial results | Position and attitude reach S2 through the gateway; `TestRun` of kind `FLIGHT` models a trial | Datasets and trained models are not modelled; nothing runs on the Jetson yet |
-| **M2** HILS anomaly detection | Verdicts, anomaly windows, root-cause attributions | All three, through the bench connector: `recordTestVerdict`, `raiseAnomaly` carrying `detectedAt` and `durationS`, and `attributeAnomaly` | A bench that writes `s2.bench-report/v1`; source timestamps for millisecond alignment |
+| **M2** HILS anomaly detection | Verdicts, anomaly windows, root-cause attributions | All three, through the bench connector: `recordTestVerdict`, `raiseAnomaly` carrying `detectedAt` and `durationS`, and `attributeAnomaly` | A bench that writes `s2.bench-report/v1`; a PTP clock across bench subsystems for sub-millisecond alignment |
 | **M3** Generated aviation documents | Requirements and documents with traceability | `Requirement` and `EngineeringDocument` across the SYSRS, IRS, MOM, SRS, SDD, ICD, STP and STR kinds, and `baselineDocument` — proposable by an agent, approved by a person | A generator that writes the documents and requests the baseline |
 | **M4** Offline agentic engineering platform | Source, builds, unit and SITL test reports | Everything but the source, through the build connector: `SoftwareBuild` with its commit and artifact digest, `implements` links, and unit and SITL runs closed with verdicts | A pipeline that emits `s2.build-record/v1`; S2's offline install path is untested |
 | **M5** Multi-drone GIS simulator | Simulated missions and telemetry | Simulated telemetry enters on the same contract as an aircraft, which `tools/mavlink-sim` demonstrates; `TestRun` of kind `SIMULATION` | Scenarios and GIS terrain are not modelled |
@@ -104,7 +104,7 @@ their object types, link types and actions defined and are waiting on the module
 
 | Component | Path | State |
 |---|---|---|
-| MAVLink gateway | `gateways/mavlink-gateway` | Built. Parser tested against pymavlink; output validated against S2's contract code; MQTT tested against a broker, including reconnect |
+| MAVLink gateway | `gateways/mavlink-gateway` | Built. Stamps telemetry with source time, names its clock source and measures vehicle clock skew; run at 10 Hz end to end into TimescaleDB. Parser tested against pymavlink; output validated against S2's contract code; MQTT tested against a broker, including reconnect |
 | Drone engineering ontology | `ontologies/drone-engineering` | 6 object types, 9 link types and 7 actions. Version 0.4.0, whose gate checks the run a step names, applied to a live S2 engine |
 | HILS bench connector | `connectors` | Built. Bench report contract v1, and a report written into a live engine end to end |
 | Build provenance connector | `connectors` | Built. Build record contract v1, and a record written into a live engine end to end |
@@ -120,6 +120,7 @@ their object types, link types and actions defined and are waiting on the module
 | The parser decodes MAVLink correctly | Frames for every decoded message, encoded by pymavlink in v1 and v2, compared field by field |
 | It survives fragmentation, noise and corruption | A multi-frame stream fed one byte at a time with leading garbage; a flipped payload byte |
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own validator |
+| Telemetry carries source time | Three simulated drones with clocks 250, 500 and 750 ms ahead, at 10 Hz into TimescaleDB: stored at vehicle time, offsets measured to 0.1 ms, none out of order |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
 | The worked example runs end to end | At pack 0.4.0: 27 requests against a live engine; the build advanced to `SIM_PASSED` through the gate, the document baseline held for a second person, and flight clearance refused in the policy's words |
 | A bench report becomes a test run | Submitted live: the run created and linked, two anomalies raised with their windows, one attributed, the verdict recorded |

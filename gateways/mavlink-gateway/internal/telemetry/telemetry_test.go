@@ -14,7 +14,7 @@ import (
 
 const tenant = "00000000-0000-0000-0000-000000000001"
 
-func feed(t *testing.T, a *Aggregator, names ...string) {
+func feed(t *testing.T, a *Aggregator, arrival time.Time, names ...string) {
 	t.Helper()
 	file, err := os.Open("../mavlink/testdata/golden.txt")
 	if err != nil {
@@ -35,17 +35,16 @@ func feed(t *testing.T, a *Aggregator, names ...string) {
 			t.Fatalf("no golden frame %q", name)
 		}
 		for _, f := range p.Write(raw) {
-			a.Apply(f)
+			a.Apply(f, arrival)
 		}
 	}
 }
 
 func TestFlushBuildsContractMessage(t *testing.T) {
 	a := NewAggregator(Config{TenantID: tenant, ObjectType: "CommercialDrone", Vehicles: map[uint8]string{7: "DRN-0007"}})
-	feed(t, a, "heartbeat_v2", "sys_status_v2", "attitude_v2", "global_position_int_v2", "vfr_hud_v2",
-		"gps_raw_int_v2", "battery_status_v2")
-
 	now := time.Date(2026, 11, 19, 1, 2, 3, 456_000_000, time.FixedZone("IST", 19800))
+	feed(t, a, now, "heartbeat_v2", "sys_status_v2", "attitude_v2", "global_position_int_v2", "vfr_hud_v2",
+		"gps_raw_int_v2", "battery_status_v2")
 	out := a.Flush(now)
 	if len(out) != 1 {
 		t.Fatalf("got %d messages, want 1", len(out))
@@ -67,8 +66,16 @@ func TestFlushBuildsContractMessage(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
+	// No SYSTEM_TIME: the boot epoch is estimated from arrival, so the one sample
+	// (time_boot_ms 1000, arriving at now) is stamped at now, in UTC.
 	if got.TS != "2026-11-18T19:32:03.456Z" || got.Seq != 1 {
 		t.Errorf("ts=%s seq=%d", got.TS, got.Seq)
+	}
+	if got.Metrics["clock_source"] != "estimated" {
+		t.Errorf("clock_source = %v, want estimated", got.Metrics["clock_source"])
+	}
+	if _, ok := got.Metrics["clock_offset_ms"]; ok {
+		t.Error("an offset was published without SYSTEM_TIME to measure it")
 	}
 	if got.Metrics["armed"] != true || got.Metrics["system_state"] != "ACTIVE" {
 		t.Errorf("heartbeat metrics = %v", got.Metrics)
@@ -91,7 +98,7 @@ func TestFlushBuildsContractMessage(t *testing.T) {
 	if again := a.Flush(now); len(again) != 0 {
 		t.Errorf("a second flush with no new frames published %d messages", len(again))
 	}
-	feed(t, a, "attitude_v2")
+	feed(t, a, now, "attitude_v2")
 	if next := a.Flush(now); len(next) != 1 || next[0].Message.Seq != 2 || next[0].Message.Position != nil {
 		t.Errorf("flush after one attitude frame = %+v", next)
 	}
@@ -99,11 +106,11 @@ func TestFlushBuildsContractMessage(t *testing.T) {
 
 func TestIgnoresGroundStationsAndMissingFix(t *testing.T) {
 	a := NewAggregator(Config{TenantID: tenant, ObjectType: "CommercialDrone"})
-	feed(t, a, "gcs_heartbeat_v2")
+	feed(t, a, time.Now(), "gcs_heartbeat_v2")
 	if out := a.Flush(time.Now()); len(out) != 0 {
 		t.Fatalf("a ground station heartbeat produced telemetry: %+v", out)
 	}
-	feed(t, a, "global_position_no_heading_v2", "sys_status_unknown_v2")
+	feed(t, a, time.Now(), "global_position_no_heading_v2", "sys_status_unknown_v2")
 	out := a.Flush(time.Now())
 	if len(out) != 1 || out[0].Message.Position != nil {
 		t.Fatalf("a 0,0 position must not be published: %+v", out)
@@ -113,5 +120,48 @@ func TestIgnoresGroundStationsAndMissingFix(t *testing.T) {
 	}
 	if _, ok := out[0].Message.Metrics["battery_voltage"]; ok {
 		t.Errorf("unknown battery voltage was published: %v", out[0].Message.Metrics)
+	}
+}
+
+func TestSystemTimeStampsMessagesOnTheVehicleClock(t *testing.T) {
+	a := NewAggregator(Config{TenantID: tenant, ObjectType: "CommercialDrone"})
+	// The golden SYSTEM_TIME says the vehicle read 01:02:03.456789Z at boot + 1 s.
+	// It reaches a gateway whose clock reads 0.3 s earlier: the vehicle runs ahead.
+	vehicle := time.Date(2026, 11, 25, 1, 2, 3, 456_789_000, time.UTC)
+	arrival := vehicle.Add(-300 * time.Millisecond)
+	feed(t, a, arrival, "system_time_v2")
+	if out := a.Flush(arrival); len(out) != 0 {
+		t.Fatalf("SYSTEM_TIME alone published %+v; it carries no metric", out)
+	}
+
+	feed(t, a, arrival, "attitude_v2") // sampled at boot + 1 s, the same instant
+	out := a.Flush(arrival)
+	if len(out) != 1 {
+		t.Fatalf("got %d messages", len(out))
+	}
+	m := out[0].Message
+	if m.TS != "2026-11-25T01:02:03.456Z" {
+		t.Errorf("ts = %s, want the vehicle's time, not the gateway's", m.TS)
+	}
+	if m.Metrics["clock_source"] != "gnss" || m.Metrics["clock_offset_ms"] != 300.0 {
+		t.Errorf("clock metrics = %v / %v", m.Metrics["clock_source"], m.Metrics["clock_offset_ms"])
+	}
+}
+
+func TestUnsetSystemTimeFallsBackToTheEstimate(t *testing.T) {
+	a := NewAggregator(Config{TenantID: tenant, ObjectType: "CommercialDrone"})
+	arrival := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+	feed(t, a, arrival, "system_time_unset_v2", "attitude_v2")
+	if m := a.Flush(arrival)[0].Message; m.Metrics["clock_source"] != "estimated" || m.TS != "2026-11-20T08:00:00.000Z" {
+		t.Errorf("message = %+v", m)
+	}
+}
+
+func TestUntimedFramesAreStampedOnArrival(t *testing.T) {
+	a := NewAggregator(Config{TenantID: tenant, ObjectType: "CommercialDrone"})
+	arrival := time.Date(2026, 11, 20, 8, 0, 0, 250_000_000, time.UTC)
+	feed(t, a, arrival, "heartbeat_v2", "sys_status_v2")
+	if m := a.Flush(arrival.Add(time.Second))[0].Message; m.Metrics["clock_source"] != "gateway" || m.TS != "2026-11-20T08:00:00.250Z" {
+		t.Errorf("message = %+v; want the arrival time, not the flush time", m)
 	}
 }

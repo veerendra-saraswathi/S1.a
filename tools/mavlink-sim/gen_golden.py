@@ -32,6 +32,9 @@ def frames(dialect, tag: str):
         dialect.MAV_TYPE_GCS, dialect.MAV_AUTOPILOT_INVALID, 0, 0, dialect.MAV_STATE_ACTIVE
     )
     yield f"sys_status_{tag}", mav.sys_status_encode(0, 0, 0, 235, 24310, 1250, 76, 0, 0, 0, 0, 0, 0)
+    # 2026-11-25T01:02:03.456789Z on the vehicle, 1.0 s after boot; then no time source.
+    yield f"system_time_{tag}", mav.system_time_encode(1_795_568_523_456_789, 1000)
+    yield f"system_time_unset_{tag}", mav.system_time_encode(0, 1000)
     yield f"sys_status_unknown_{tag}", mav.sys_status_encode(0, 0, 0, 0, 65535, -1, -1, 0, 0, 0, 0, 0, 0)
     yield f"gps_raw_int_{tag}", mav.gps_raw_int_encode(1_000_000, 3, 174401000, 783489000, 580000, 80, 120, 500, 9000, 14)
     yield f"attitude_{tag}", mav.attitude_encode(1000, math.radians(10), math.radians(-5), math.radians(90), 0, 0, 0)

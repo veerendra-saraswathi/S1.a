@@ -87,6 +87,17 @@ func TestDecodesPymavlinkFrames(t *testing.T) {
 			near(t, "roll", at.RollDeg, 10)
 			near(t, "pitch", at.PitchDeg, -5)
 			near(t, "yaw", at.YawDeg, 90)
+			if at.BootMs != 1000 {
+				t.Errorf("attitude time_boot_ms = %d, want 1000", at.BootMs)
+			}
+
+			st := DecodeSystemTime(one(t, g["system_time_"+tag]).Payload)
+			if st.UnixUsec != 1_795_568_523_456_789 || st.BootMs != 1000 {
+				t.Errorf("system time = %+v", st)
+			}
+			if unset := DecodeSystemTime(one(t, g["system_time_unset_"+tag]).Payload); unset.UnixUsec != 0 {
+				t.Errorf("unset system time = %+v", unset)
+			}
 
 			pos := DecodeGlobalPositionInt(one(t, g["global_position_int_"+tag]).Payload)
 			near(t, "lat", pos.LatDeg, 17.4401)
@@ -96,6 +107,9 @@ func TestDecodesPymavlinkFrames(t *testing.T) {
 			near(t, "ground speed", pos.GroundSpeedMps, 5) // 3 m/s north, 4 m/s east
 			near(t, "climb", pos.ClimbMps, 1.5)
 			near(t, "heading", *pos.HeadingDeg, 87)
+			if pos.BootMs != 1000 {
+				t.Errorf("position time_boot_ms = %d, want 1000", pos.BootMs)
+			}
 			if nh := DecodeGlobalPositionInt(one(t, g["global_position_no_heading_"+tag]).Payload); nh.HeadingDeg != nil {
 				t.Errorf("heading 65535 should decode as unknown, got %v", *nh.HeadingDeg)
 			}
