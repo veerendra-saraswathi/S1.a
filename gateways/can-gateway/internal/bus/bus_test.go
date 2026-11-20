@@ -13,7 +13,7 @@ import (
 
 const tenant = "00000000-0000-0000-0000-000000000001"
 
-func goldenLines(t *testing.T) []string {
+func goldenLines(t testing.TB) []string {
 	t.Helper()
 	file, err := os.Open("../dronecan/testdata/golden.log")
 	if err != nil {

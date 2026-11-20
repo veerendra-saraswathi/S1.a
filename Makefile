@@ -12,6 +12,7 @@
 #   make run         publish telemetry to the S2 broker
 #   make seed        apply the ontology pack and load the worked example
 #   make gate        walk a build through the gate, from record to bench pass
+#   make bench       end-to-end latency per hop at increasing load (needs S2 up)
 #
 # `make help` lists everything.
 
@@ -36,12 +37,13 @@ RATE_HZ  ?= 1
 # The simulated bench's DroneCAN nodes: flight controller, gimbal, ESC board.
 CAN_NODES ?= 1=SUB-DRN1-FC,10=SUB-DRN1-GIMBAL,20=SUB-DRN1-ESC
 CAN_FAULT ?= reduced_gain
+STEPS     ?= 3,10,50
 REPORT   ?= $(CONNECTORS)/examples/TR-HILS-0058.json
 RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
 .PHONY: help test test-gateway test-connectors test-policy install-policy build build-can run run-dry \
-        sim can-dry can-run can-golden seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
+        sim can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
         golden lint fmt clean
 
 help:  ## list the targets
@@ -89,6 +91,12 @@ can-dry: build-can  ## 20 s of a simulated DroneCAN bench, with a fault at 10 s,
 
 can-run: build-can  ## the simulated bench in real time, published to the S2 broker (Ctrl-C to stop)
 	uv run $(CAN_SIM) --realtime --seconds 0 --fault $(CAN_FAULT) --fault-at 10 | ./$(CAN_BIN) -nodes $(CAN_NODES)
+
+bench: build  ## end-to-end latency per hop, 3 to 50 simulated drones (STEPS=3,10,50; needs S2 up, a quiet machine)
+	uv run tools/bench/bench.py --steps $(STEPS) --seconds 20
+
+bench-go:  ## the gateways' receive-path benchmarks
+	cd $(GATEWAYS) && go test -run '^$$' -bench . -benchmem ./mavlink-gateway/internal/telemetry ./can-gateway/internal/bus
 
 seed: install-policy  ## apply the ontology pack and load the worked example into S2
 	uv run $(SEED)

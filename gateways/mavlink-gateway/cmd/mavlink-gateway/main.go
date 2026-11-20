@@ -123,7 +123,9 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("stopping: published %d, failed %d", published, failed)
+			s := stats.Load()
+			log.Printf("stopping: mavlink frames=%d bad_crc=%d undecoded=%d dropped=%d | published %d, failed %d",
+				s.Frames, s.BadCRC, s.Unknown, s.Dropped, published, failed)
 			return
 		case now := <-publish.C:
 			for _, out := range agg.Flush(now) {

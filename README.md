@@ -123,6 +123,7 @@ their object types, link types and actions defined and are waiting on the module
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own validator |
 | The CAN gateway reads DroneCAN correctly | Frames for every decoded type, encoded by the dronecan package, decoded and compared field by field; a corrupted transfer fails its CRC, a lost frame drops it |
 | A bench fault reaches S2 | A simulated gimbal rig through the CAN gateway into TimescaleDB at 10 Hz: a binding fault raised the pitch tracking error from 0.014 to 0.073 rad and the gimbal's health to WARNING |
+| Telemetry latency, end to end | Benchmarked from 3 to 100 simulated drones at 10 Hz, timed at every hop: nothing lost; S2's sink found to add up to 1 s, and changed in S2 (total p95 at 3 drones from 1,018 to 258 ms). At 50+ drones the change is not yet measured on a quiet machine |
 | Telemetry carries source time | Three simulated drones with clocks 250, 500 and 750 ms ahead, at 10 Hz into TimescaleDB: stored at vehicle time, offsets measured to 0.1 ms, none out of order |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
 | The worked example runs end to end | At pack 0.4.0: 27 requests against a live engine; the build advanced to `SIM_PASSED` through the gate, the document baseline held for a second person, and flight clearance refused in the policy's words |
@@ -196,6 +197,7 @@ help` lists every target. Flags, published metrics and known limits are in the
 | [Architecture](docs/architecture.md) | Components, data flows, the ontology, and what runs where |
 | [Technical paper](docs/technical-paper.md) | The design argument, how it was verified, and what is open |
 | [Tech stack](docs/tech-stack.md) | Every technology in use or planned, and why it was chosen |
+| [Benchmarks](docs/benchmarks.md) | Gateway cost and end-to-end latency per hop, measured, with the conditions |
 | [Connectors](connectors/README.md) | Both contracts, what a document becomes in S2, and where the connectors are thin |
 | [Gateway](gateways/mavlink-gateway/README.md) | Flags, published metrics, and the parser's limits |
 

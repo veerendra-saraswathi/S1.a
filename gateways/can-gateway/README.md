@@ -94,7 +94,7 @@ types are counted as undecoded. The counters are logged every 30 s and at the en
   re-run the upload.
 - **`ts` is per message, not per metric.** At the default 10 Hz a message's values can be
   up to 100 ms apart. Use `-rate-hz 50` for a 50 Hz control loop.
-- **Throughput is not benchmarked.** A three-node rig at 50 Hz has been run end to end.
+- **Throughput is benchmarked in isolation only:** 1.24 µs per candump line, about 800,000 lines a second on one core ([benchmarks](../../docs/benchmarks.md)). End to end, a three-node rig at 50 Hz has been run.
 
 ## Adding a message
 

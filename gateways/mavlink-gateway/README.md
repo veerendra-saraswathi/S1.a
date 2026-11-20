@@ -86,7 +86,7 @@ MAVLink arrives at tens of messages per second. The gateway keeps the latest val
 - **Seven messages are decoded.** Frames with any other message id are skipped by length, without checksum verification.
 - **Signed MAVLink 2 frames are accepted but the signature is not verified.**
 - **UDP only.** The parser handles byte streams, but serial and TCP inputs are not wired up.
-- **Throughput is not benchmarked.** Three vehicles at 10 Hz have been run end to end into TimescaleDB ([technical paper](../../docs/technical-paper.md) §6); higher counts and rates have not.
+- **Benchmarked to 100 vehicles at 10 Hz** on a laptop: 9% of one core and 13 MB, every frame received ([benchmarks](../../docs/benchmarks.md)). The receive path costs 367 ns a frame. Higher counts and rates have not been run.
 
 ## Adding a message
 
