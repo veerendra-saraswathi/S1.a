@@ -17,9 +17,11 @@ into a running S2 stack. It times every message at each hop:
 | Bridge → Kafka | `received_at` | the harness's Kafka consumer receives the envelope | host |
 | Kafka → stored | the harness's consumer | the row's `ingested_at` in TimescaleDB | Docker VM |
 
-Before loading anything it calibrates the Docker VM's clock against the host's: the broker
-hands each probe message to the harness and the bridge at the same moment, so the median
-difference is the offset, and it is subtracted from every VM-side time. It samples the
+Before and after every step it reads the Docker VM's clock against the host's the way NTP
+does: about 200 `clock_timestamp()` queries to TimescaleDB, which runs on the VM's clock,
+keeping the one with the shortest round trip (under 1 ms). Each step subtracts the mean
+of its two readings from every VM-side time. A step whose readings differ by more than
+2 ms is flagged, because Docker Desktop resyncs the VM clock in steps. It samples the
 gateway's CPU and memory and the CPU of S2's ingestion containers during load, and after
 each step waits for S2 to drain, so "stored" counts every message that ever arrived.
 
@@ -125,9 +127,12 @@ TimescaleDB peaked at 45% CPU at 100 drones, where it reached 118% before. Every
 that reached the broker was stored. The shortfall at the broker, 3 at 3 drones and 100 at
 100, is the Python simulator missing ticks, as before.
 
-Broker → bridge came out at -7 to -16 ms, which is impossible. The clock calibration
-(+13.2 ms on this run) is off by about that much, so VM-side times, Total among them, may
-be up to about 15 ms too low. That doesn't change any conclusion here. Swap use also grew
+Broker → bridge came out at -7 to -16 ms, which is impossible. The harness then measured
+the VM clock once, at the start (+13.2 ms), and the clock moved after that: Docker had
+restarted half an hour earlier, and 50 minutes later the same clock read -2 ms by two
+independent methods. VM-side times, Total among them, are therefore up to about 15 ms
+too low on this run. That doesn't change any conclusion here, and the harness now
+re-reads the clock around every step. Swap use also grew
 during the run, from 5.6 to 9.6 GB of 10 GB, but the load stayed at 4-5, so the host was
 not thrashing the way it was on 2026-11-20.
 

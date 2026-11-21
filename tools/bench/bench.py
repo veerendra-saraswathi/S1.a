@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["paho-mqtt>=2.1", "confluent-kafka>=2.6"]
+# dependencies = ["paho-mqtt>=2.1", "confluent-kafka>=2.6", "psycopg[binary]>=3.2"]
 # ///
 """End-to-end benchmark: simulated drones -> mavlink-gateway -> S2 -> TimescaleDB.
 
@@ -20,10 +20,15 @@ It also samples the gateway's CPU and memory, and counts messages lost at each h
 
 The S2 stack must be up (`make up` in S2). `bridge` and `stored` are read on the clock of
 Docker's VM, the rest on this host's, and the two can disagree by tens of milliseconds.
-Before loading anything, the harness calibrates: it publishes probe messages at a
-trickle, and since the broker hands each one to this harness and to the bridge at the
-same moment, the median of (bridge receive - harness receive) is the VM clock's offset.
-It is reported as `vm_clock_offset_ms` and subtracted from every VM-side time.
+The VM's clock also moves: Docker Desktop resyncs it to the host's in steps, most often
+in the first half hour after Docker starts, so one measurement at the start can go stale.
+So before and after every step the harness reads the VM clock the way NTP does: it asks
+TimescaleDB (in the VM, on the same kernel clock as the bridge) for clock_timestamp() a
+couple of hundred times over one connection and keeps the reading with the shortest
+round trip, which puts the offset within half that round trip, under a millisecond. Each
+step subtracts the mean of its two readings from every VM-side time and reports both as
+`vm_clock_offset_ms`. If they differ by more than 2 ms, the step is flagged: its
+VM-side hops are off by up to that much.
 
 During each step it also samples the CPU of S2's ingestion containers, which shows
 which stage saturates first.
@@ -46,6 +51,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
+import psycopg
 from confluent_kafka import Consumer, TopicPartition
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -152,36 +158,22 @@ def sample_containers(samples: dict[str, list[float]], stop: threading.Event) ->
                 samples[name].append(float(cpu[:-1]))
 
 
-def calibrate(args) -> float:
-    """The Docker VM clock minus this host's, in seconds (see the module docstring)."""
-    prefix = f"BENCH-CAL-{uuid.uuid4().hex[:6].upper()}"
-    recorder = Recorder(prefix)
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"s1a-bench-{prefix}")
-    client.on_message = recorder.on_mqtt
-    client.connect(args.mqtt_host, args.mqtt_port)
-    topic = f"s2/v1/{TENANT}/CommercialDrone/{prefix}/telemetry"
-    client.subscribe(topic)
-    client.loop_start()
-    stop, ready = threading.Event(), threading.Event()
-    thread = threading.Thread(target=kafka_listener, args=(args.kafka, args.topic, recorder, ready, stop), daemon=True)
-    thread.start()
-    if not ready.wait(20):
-        sys.exit("the Kafka consumer was not assigned its partitions within 20 s")
-    time.sleep(0.5)
-    for i in range(40):
-        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-        client.publish(topic, json.dumps({"ts": ts, "metrics": {"bench_probe": i}, "seq": i}))
-        time.sleep(0.05)
-    time.sleep(3)
-    stop.set()
-    thread.join(timeout=10)
-    client.loop_stop()
-    client.disconnect()
-    with recorder.lock:
-        deltas = [recorder.kafka[k][0] - at for k, at in recorder.broker.items() if k in recorder.kafka]
-    if len(deltas) < 20:
-        sys.exit(f"calibration saw only {len(deltas)} of 40 probes through the bridge; is S2's ingestion running?")
-    return statistics.median(deltas)
+def vm_clock_offset(url: str, samples: int = 200) -> tuple[float, float]:
+    """The Docker VM clock minus this host's, in seconds, and the round trip it was read in."""
+    best: tuple[float, float] | None = None
+    with psycopg.connect(url, autocommit=True, connect_timeout=10) as conn, conn.cursor() as cursor:
+        for _ in range(samples):
+            sent = time.time()
+            cursor.execute("select extract(epoch from clock_timestamp())::float8")
+            vm = cursor.fetchone()[0]
+            back = time.time()
+            if best is None or back - sent < best[1]:
+                best = (vm - (sent + back) / 2, back - sent)
+    assert best is not None
+    return best
+
+
+CLOCK_MOVED_S = 0.002
 
 
 def sample_process(pid: int, samples: list[tuple[float, float]], stop: threading.Event) -> None:
@@ -191,7 +183,8 @@ def sample_process(pid: int, samples: list[tuple[float, float]], stop: threading
             samples.append((float(out[0]), float(out[1]) / 1024))
 
 
-def run_step(args, drones: int, port: int, offset: float) -> dict:
+def run_step(args, drones: int, port: int) -> dict:
+    offset_before, _ = vm_clock_offset(args.telemetry_url)
     prefix = f"BENCH-{uuid.uuid4().hex[:6].upper()}-"
     vehicles = ",".join(f"{i}={prefix}{i:04d}" for i in range(1, drones + 1))
     recorder = Recorder(prefix)
@@ -249,6 +242,8 @@ def run_step(args, drones: int, port: int, offset: float) -> dict:
     client.disconnect()
 
     stored = stored_rows(args.psql, prefix, since)
+    offset_after, _ = vm_clock_offset(args.telemetry_url)
+    offset = (offset_before + offset_after) / 2
     with recorder.lock:
         broker, kafka = dict(recorder.broker), dict(recorder.kafka)
 
@@ -281,7 +276,8 @@ def run_step(args, drones: int, port: int, offset: float) -> dict:
         "gateway_cpu_pct_max": round(max(cpu), 1) if cpu else None,
         "gateway_rss_mb_max": round(max(m for _, m in samples), 1) if samples else None,
         "gateway_log": stopping.split("stopping: ", 1)[-1],
-        "vm_clock_offset_ms": round(offset * 1000, 1),
+        "vm_clock_offset_ms": {"before": round(offset_before * 1000, 1), "after": round(offset_after * 1000, 1)},
+        "vm_clock_moved": abs(offset_after - offset_before) > CLOCK_MOVED_S,
         "s2_cpu_pct_max": {name.removeprefix("s2-"): max(v) if v else None for name, v in containers.items()},
         "latency_ms": {
             hop: {q: round(pct(v, q) * 1000, 1) for q in (50, 95, 99)} | {"n": len(v)} for hop, v in hops.items()
@@ -291,11 +287,12 @@ def run_step(args, drones: int, port: int, offset: float) -> dict:
 
 def table(results: list[dict]) -> str:
     lines = [
-        "| Drones | Expected | At broker | Stored | Gateway CPU mean / max, RSS | Source→broker p50 / p95 | Broker→bridge p50 / p95 | Bridge→Kafka p50 / p95 | Kafka→stored p50 / p95 | **Total p50 / p95 / p99** | Peak CPU: bridge / sink / TimescaleDB |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Drones | Expected | At broker | Stored | Gateway CPU mean / max, RSS | Source→broker p50 / p95 | Broker→bridge p50 / p95 | Bridge→Kafka p50 / p95 | Kafka→stored p50 / p95 | **Total p50 / p95 / p99** | Peak CPU: bridge / sink / TimescaleDB | VM clock before → after |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
-        lat, cpu = r["latency_ms"], r["s2_cpu_pct_max"]
+        lat, cpu, clock = r["latency_ms"], r["s2_cpu_pct_max"], r["vm_clock_offset_ms"]
+        moved = " ⚠ moved" if r["vm_clock_moved"] else ""
         lines.append(
             f"| {r['drones']} | {r['expected']} | {r['at_broker']} | {r['stored']} "
             f"| {r['gateway_cpu_pct_mean']}% / {r['gateway_cpu_pct_max']}%, {r['gateway_rss_mb_max']} MB "
@@ -304,7 +301,8 @@ def table(results: list[dict]) -> str:
             f"| {lat['bridge_to_kafka'][50]} / {lat['bridge_to_kafka'][95]} ms "
             f"| {lat['kafka_to_stored'][50]} / {lat['kafka_to_stored'][95]} ms "
             f"| **{lat['total'][50]} / {lat['total'][95]} / {lat['total'][99]} ms** "
-            f"| {cpu['mqtt-bridge']}% / {cpu['timeseries-sink']}% / {cpu['timescaledb']}% |"
+            f"| {cpu['mqtt-bridge']}% / {cpu['timeseries-sink']}% / {cpu['timescaledb']}% "
+            f"| {clock['before']:+} → {clock['after']:+} ms{moved} |"
         )
     return "\n".join(lines)
 
@@ -321,19 +319,26 @@ def main() -> None:
     parser.add_argument("--topic", default="s2.telemetry.raw")
     parser.add_argument("--psql", default="docker exec s2-timescaledb psql -U postgres -d telemetry",
                         help="command that runs psql against S2's telemetry database")
+    parser.add_argument("--telemetry-url", default="postgresql://postgres:postgres_dev@localhost:5433/telemetry",
+                        help="libpq URL of S2's TimescaleDB as this host reaches it, to read the VM's clock")
     parser.add_argument("--json", help="also write the results here")
     args = parser.parse_args()
     args.psql = args.psql.split()
     if not GATEWAY.exists():
         sys.exit("bin/mavlink-gateway is missing: run `make build` first")
 
-    offset = calibrate(args)
-    print(f"Docker VM clock is {offset * 1000:+.1f} ms from this host's", file=sys.stderr, flush=True)
+    offset, rtt = vm_clock_offset(args.telemetry_url)
+    print(f"Docker VM clock is {offset * 1000:+.1f} ms from this host's (read in {rtt * 1000:.2f} ms)",
+          file=sys.stderr, flush=True)
     results = []
     for i, drones in enumerate(int(s) for s in args.steps.split(",")):
         print(f"step {i + 1}: {drones} drones at {args.rate_hz} Hz for {args.seconds} s ...", file=sys.stderr, flush=True)
-        result = run_step(args, drones, 14600 + i, offset)
+        result = run_step(args, drones, 14600 + i)
         print(json.dumps(result), file=sys.stderr, flush=True)
+        if result["vm_clock_moved"]:
+            clock = result["vm_clock_offset_ms"]
+            print(f"  the VM clock moved {clock['before']:+} → {clock['after']:+} ms during this step;"
+                  " its VM-side hops are off by up to the difference", file=sys.stderr, flush=True)
         results.append(result)
 
     print(table(results))
