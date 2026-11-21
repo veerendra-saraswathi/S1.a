@@ -123,7 +123,7 @@ their object types, link types and actions defined and are waiting on the module
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own validator |
 | The CAN gateway reads DroneCAN correctly | Frames for every decoded type, encoded by the dronecan package, decoded and compared field by field; a corrupted transfer fails its CRC, a lost frame drops it |
 | A bench fault reaches S2 | A simulated gimbal rig through the CAN gateway into TimescaleDB at 10 Hz: a binding fault raised the pitch tracking error from 0.014 to 0.073 rad and the gimbal's health to WARNING |
-| Telemetry latency, end to end | Benchmarked from 3 to 100 simulated drones at 10 Hz, timed at every hop: nothing lost; S2's sink found to add up to 1 s, and changed in S2 (total p95 at 3 drones from 1,018 to 258 ms). At 50+ drones the change is not yet measured on a quiet machine |
+| Telemetry latency, end to end | Benchmarked from 3 to 100 simulated drones at 10 Hz, timed at every hop, on a quiet host: nothing lost after the broker. S2's sink was found to add up to 1 s and to fall behind at 100 drones, and was changed in S2 (0.1 s batch wait, one `unnest` insert per batch). Total p95 is now 146, 175, 246 and 293 ms at 3, 10, 50 and 100 drones, against a 500 ms target |
 | Telemetry carries source time | Three simulated drones with clocks 250, 500 and 750 ms ahead, at 10 Hz into TimescaleDB: stored at vehicle time, offsets measured to 0.1 ms, none out of order |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
 | The worked example runs end to end | At pack 0.4.0: 27 requests against a live engine; the build advanced to `SIM_PASSED` through the gate, the document baseline held for a second person, and flight clearance refused in the policy's words |
@@ -136,8 +136,8 @@ their object types, link types and actions defined and are waiting on the module
 | The connectors ask for the right step | Tests against a stubbed engine: a passed SITL run asks for `SIM_PASSED`, a passed HILS run for `BENCH_PASSED`, a record with any failure asks for nothing, and a refusal is reported without failing the submission |
 
 **Not verified:** any run
-against a real autopilot or SITL; throughput, latency or resource use; behaviour on a
-lossy link. [The technical paper](docs/technical-paper.md)
+against a real autopilot or SITL; sustained load (the benchmark steps are 20 s); more than
+100 drones; behaviour on a lossy link; latency with TLS and broker authentication on. [The technical paper](docs/technical-paper.md)
 §6 is the full table and §7 the open questions.
 
 ## Tech stack
