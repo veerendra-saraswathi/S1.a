@@ -31,6 +31,46 @@ gateway's stream input instead of UDP, connect it to SERIAL2, which streams the 
 telemetry: `./bin/mavlink-gateway -input tcp:127.0.0.1:5763 -vehicles 1=DRN-0001 -rate-hz 10`. The sortie's
 altitude and square are `fly.py --alt` and `--side`.
 
+## A fleet
+
+Up to five copters at once, through one gateway, as a small deployment would run:
+
+```bash
+make sitl-fleet FLEET=3     # s1a-sitl-1..3: system ids 1..3, homes 180 m apart northwards
+make sitl-fleet-gw          # in a second terminal: system id i publishes as DRN-000i
+make sitl-fleet-fly         # all fly at once at 30, 35 and 40 m; copter 2 is rebooted after landing
+make sitl-fleet-stop
+```
+
+Copter i is commanded on TCP `5762 + 10 * (i - 1)`. S2's demo has DRN-0001 to DRN-0003;
+copters 4 and 5 need objects of their own to appear in the Workshop.
+
+`tools/sitl/fleet.py` subscribes on the broker as the read-only `s2-monitor` for the
+whole run, then judges each drone on its own: the sortie completed; 10 Hz; no gap over
+500 ms; its `ts` only moving forward on one clock; no two messages with one timestamp;
+every position within 250 m of its own home, which catches system ids crossed in the
+mapping; everything the broker delivered stored; p95 under 500 ms by each message's own
+clock offset; and for the rebooted copter, `BOOT` reported again and telemetry resumed. A
+drone whose simulator fell more than 1% off real time and failed only on timing is
+INCONCLUSIVE. Runs are kept in `bin/fleet/<stamp>/`, and `fleet.py --recheck <dir>` judges
+one again without flying.
+
+What the first runs taught:
+
+- **A reboot is measured from the new boot's first heartbeat**, not from the restart:
+  `docker restart` lets the old boot run up to 10 s first. Between them is the outage
+  itself, about 2 s; then 3.7 s of heartbeats alone before ArduPilot's streams start.
+- **A rebooted copter steps back once when it is re-anchored on GNSS time**: its first
+  minutes are on the estimated clock, and SITL's GNSS clock runs about a second behind.
+  The gateway allows that step because the clock source changes with it.
+
+One run on 2026-11-26, three copters, all PASS at 100% of real time: 9.7 to 10.0 Hz,
+longest gap 200 ms (101 ms either side of copter 2's reboot), every timestamp distinct and
+forward, every position at its own home, every delivered message stored, p95 170 to
+215 ms. The gateway's own count over three runs matched every boot: `reboots 1=2,2=5,3=2`.
+It also skipped 1,440 bytes it could not frame in 99,324 frames, with no bad checksum;
+where they came from is not established.
+
 ## The image
 
 `ArduCopter stable` for Linux x86_64 from `firmware.ardupilot.org`, statically linked,

@@ -55,12 +55,15 @@ STEPS     ?= 3,10,50
 SITL_IMAGE   := s1a-sitl-copter
 SITL_SYSID   ?= 1
 SITL_VEHICLE ?= DRN-0001
+# A small SITL fleet: copter i has system id i, publishes as DRN-000i, has its home 180 m
+# north of copter i-1's, and its control port at 5762 + 10 * (i - 1).
+FLEET ?= 3
 REPORT   ?= $(CONNECTORS)/examples/TR-HILS-0058.json
 RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
 .PHONY: help test test-gateway test-gateway-linux test-connectors test-policy install-policy build build-can run run-dry \
-        sim sitl-image sitl sitl-gw sitl-fly sitl-stop pipeline pipeline-dry can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
+        sim sitl-image sitl sitl-gw sitl-fly sitl-stop sitl-fleet sitl-fleet-gw sitl-fleet-fly sitl-fleet-stop pipeline pipeline-dry can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
         golden lint fmt clean
 
 help:  ## list the targets
@@ -128,6 +131,27 @@ pipeline-dry:  ## the same without S2 or submitting: SITL judged on the gateway'
 
 sitl-stop:  ## stop the SITL container
 	-docker rm -f s1a-sitl
+
+sitl-fleet: sitl-image  ## start FLEET ArduCopter SITL containers (default 3, at most 5), all streaming to UDP 14550
+	@test $(FLEET) -ge 1 -a $(FLEET) -le 5 || { echo "FLEET must be 1 to 5"; exit 1; }
+	@if docker ps -q --filter name=^s1a-sitl$$ | grep -q .; then echo "make sitl-stop first: the single SITL uses copter 1's ports"; exit 1; fi
+	@for i in $$(seq 1 $(FLEET)); do \
+		lat=$$(awk "BEGIN { printf \"%.6f\", 17.4401 + 0.0016 * ($$i - 1) }"); \
+		docker run -d --rm --name s1a-sitl-$$i --add-host=host.docker.internal:host-gateway \
+			-p 127.0.0.1:$$((5752 + 10 * i)):5762 -p 127.0.0.1:$$((5753 + 10 * i)):5763 \
+			-e SYSID=$$i -e SITL_HOME=$$lat,78.3489,540,0 $(SITL_IMAGE) >/dev/null || exit 1; \
+		echo "copter $$i: system id $$i, home $$lat,78.3489, control tcp:127.0.0.1:$$((5752 + 10 * i))"; \
+	done
+	@echo "Next: make sitl-fleet-gw (publish to S2), then make sitl-fleet-fly. Stop: make sitl-fleet-stop"
+
+sitl-fleet-gw: build  ## one gateway for the fleet at 10 Hz: system id i publishes as DRN-000i
+	./$(BIN) -vehicles $$(seq 1 $(FLEET) | awk '{ printf "%s%d=DRN-%04d", (NR > 1 ? "," : ""), $$1, $$1 }') -rate-hz 10 -client-id s1a-fleet-gw
+
+sitl-fleet-fly:  ## fly the fleet at once, reboot copter 2 after landing, and check every drone in S2
+	uv run tools/sitl/fleet.py --fleet $(FLEET) --reboot 2
+
+sitl-fleet-stop:  ## stop the fleet's SITL containers, s1a-sitl-1 to s1a-sitl-5
+	-@for i in 1 2 3 4 5; do docker rm -f s1a-sitl-$$i >/dev/null 2>&1 || true; done
 
 can-dry: build-can  ## 20 s of a simulated DroneCAN bench, with a fault at 10 s, printed (CAN_FAULT=...)
 	uv run $(CAN_SIM) --seconds 20 --fault $(CAN_FAULT) --fault-at 10 | ./$(CAN_BIN) -nodes $(CAN_NODES) -dry-run
