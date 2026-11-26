@@ -13,6 +13,7 @@
 #   make seed        apply the ontology pack and load the worked example
 #   make gate        walk a build through the gate, from record to bench pass
 #   make bench       end-to-end latency per hop at increasing load (needs S2 up)
+#   make sitl        ArduCopter SITL streaming to the gateway; make sitl-gw, make sitl-fly
 #
 # `make help` lists everything.
 
@@ -38,12 +39,16 @@ RATE_HZ  ?= 1
 CAN_NODES ?= 1=SUB-DRN1-FC,10=SUB-DRN1-GIMBAL,20=SUB-DRN1-ESC
 CAN_FAULT ?= reduced_gain
 STEPS     ?= 3,10,50
+# ArduCopter SITL: its MAVLink system id and the S2 object it publishes as.
+SITL_IMAGE   := s1a-sitl-copter
+SITL_SYSID   ?= 1
+SITL_VEHICLE ?= DRN-0001
 REPORT   ?= $(CONNECTORS)/examples/TR-HILS-0058.json
 RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
 .PHONY: help test test-gateway test-connectors test-policy install-policy build build-can run run-dry \
-        sim can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
+        sim sitl-image sitl sitl-gw sitl-fly sitl-stop can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
         golden lint fmt clean
 
 help:  ## list the targets
@@ -85,6 +90,22 @@ run: build  ## publish telemetry for DRN-0001..3 to the S2 broker
 
 sim:  ## send MAVLink from simulated drones to the gateway
 	uv run $(SIM) --drones $(DRONES)
+
+sitl-image:  ## build the ArduCopter SITL image (downloads the pinned stable binary once)
+	docker build -t $(SITL_IMAGE) tools/sitl
+
+sitl: sitl-image  ## start ArduCopter SITL in Docker, streaming MAVLink to UDP 14550 on this host
+	docker run -d --rm --name s1a-sitl -p 127.0.0.1:5762:5762 -e SYSID=$(SITL_SYSID) $(SITL_IMAGE)
+	@echo "SITL up. Next: make sitl-gw (publish to S2), then make sitl-fly. Stop: make sitl-stop"
+
+sitl-gw: build  ## the gateway for SITL at 10 Hz, publishing as SITL_VEHICLE (default DRN-0001)
+	./$(BIN) -vehicles $(SITL_SYSID)=$(SITL_VEHICLE) -rate-hz 10
+
+sitl-fly:  ## fly the SITL copter: take off, a 100 m square, RTL
+	uv run tools/sitl/fly.py
+
+sitl-stop:  ## stop the SITL container
+	-docker rm -f s1a-sitl
 
 can-dry: build-can  ## 20 s of a simulated DroneCAN bench, with a fault at 10 s, printed (CAN_FAULT=...)
 	uv run $(CAN_SIM) --seconds 20 --fault $(CAN_FAULT) --fault-at 10 | ./$(CAN_BIN) -nodes $(CAN_NODES) -dry-run

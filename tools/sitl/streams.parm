@@ -1,0 +1,19 @@
+# What SERIAL0, the telemetry link to mavlink-gateway, streams, in messages per second.
+#
+# The gateway never sends, so it cannot ask for streams the way a ground station does;
+# the autopilot has to be told here. ArduPilot 4.7 calls these MAVn_*, where MAV1 is
+# the first MAVLink port (SERIAL0); older firmware called them SR0_*.
+#
+# 10 Hz for the timed samples the gateway stamps messages with, so a 10 Hz gateway
+# always has a fresh one:
+#   POSITION  GLOBAL_POSITION_INT       EXTRA1  ATTITUDE        EXTRA2  VFR_HUD
+#   EXT_STAT  SYS_STATUS, GPS_RAW_INT   EXTRA3  SYSTEM_TIME, BATTERY_STATUS
+MAV1_POSITION 10
+MAV1_EXTRA1 10
+MAV1_EXTRA2 10
+MAV1_EXT_STAT 2
+MAV1_EXTRA3 2
+MAV1_RAW_SENS 0
+MAV1_RC_CHAN 0
+MAV1_RAW_CTRL 0
+MAV1_ADSB 0

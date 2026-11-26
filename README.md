@@ -111,6 +111,7 @@ their object types, link types and actions defined and are waiting on the module
 | Build gate | `policies`, `connectors` | Built. `advanceBuild` and its policy; both connectors ask for the step a passed run earns. The policy sees the run a step names (S2's `policy_context`) and refuses one that is missing, failed, of another build or the wrong kind. Tested under OPA, against a stubbed engine and on a live engine |
 | Worked example | `tools/seed-chain` | Runs end to end against a live engine at pack 0.4.0, and is safe to re-run |
 | MAVLink simulator | `tools/mavlink-sim` | Built |
+| ArduCopter SITL | `tools/sitl` | Built. ArduPilot's stable SITL in Docker, pinned by digest, streaming to the gateway; a scripted sortie (take off, a 100 m square, RTL) flown end to end into TimescaleDB |
 | CAN gateway | `gateways/can-gateway` | Built. Reads `candump -L`; DroneCAN NodeStatus, ESC status and actuator status and commands, multi-frame transfers CRC-checked. Decoder tested against the dronecan package; a simulated bench run end to end into TimescaleDB. Not yet run on a real bus |
 | CAN bench simulator | `tools/can-sim` | Built. A gimbal rig with injectable actuator faults |
 
@@ -124,6 +125,7 @@ their object types, link types and actions defined and are waiting on the module
 | The CAN gateway reads DroneCAN correctly | Frames for every decoded type, encoded by the dronecan package, decoded and compared field by field; a corrupted transfer fails its CRC, a lost frame drops it |
 | A bench fault reaches S2 | A simulated gimbal rig through the CAN gateway into TimescaleDB at 10 Hz: a binding fault raised the pitch tracking error from 0.014 to 0.073 rad and the gimbal's health to WARNING |
 | Telemetry latency, end to end | Benchmarked from 3 to 100 simulated drones at 10 Hz, timed at every hop, on a quiet host: nothing lost after the broker. S2's sink was found to add up to 1 s and to fall behind at 100 drones, and was changed in S2 (0.1 s batch wait, one `unnest` insert per batch). Total p95 is now 146, 175, 246 and 293 ms at 3, 10, 50 and 100 drones, against a 500 ms target |
+| A real autopilot's telemetry reaches S2 | ArduCopter stable SITL flew a 175 s sortie through the gateway at 10 Hz: 1,745 messages and 1,816 positions in TimescaleDB, no gap after streams started, 1,671 messages on the autopilot's GNSS clock. Vehicle sample to stored row p95 196 ms once the simulator's −460 ms clock offset is added back |
 | Telemetry carries source time | Three simulated drones with clocks 250, 500 and 750 ms ahead, at 10 Hz into TimescaleDB: stored at vehicle time, offsets measured to 0.1 ms, none out of order |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
 | The worked example runs end to end | At pack 0.4.0: 27 requests against a live engine; the build advanced to `SIM_PASSED` through the gate, the document baseline held for a second person, and flight clearance refused in the policy's words |
@@ -135,8 +137,8 @@ their object types, link types and actions defined and are waiting on the module
 | The gate holds on a live engine | Build 2026.11.4 walked from `BUILT` to `BENCH_PASSED` by `make gate`; a step backwards refused with the policy's reason; its clearance request held at 202 for a second person |
 | The connectors ask for the right step | Tests against a stubbed engine: a passed SITL run asks for `SIM_PASSED`, a passed HILS run for `BENCH_PASSED`, a record with any failure asks for nothing, and a refusal is reported without failing the submission |
 
-**Not verified:** any run
-against a real autopilot or SITL; sustained load (the benchmark steps are 20 s); more than
+**Not verified:** a real
+flight controller (only SITL so far); sustained load (the benchmark steps are 20 s); more than
 100 drones; behaviour on a lossy link; latency with TLS and broker authentication on. [The technical paper](docs/technical-paper.md)
 §6 is the full table and §7 the open questions.
 
@@ -181,6 +183,10 @@ make gate
 `make seed` first copies the build gate's policy into the S2 checkout it expects beside
 this one (`S2_DIR=../S2`), where S2's OPA picks it up. `make gate` then walks build
 2026.11.4 through: recorded, simulation passed, bench passed.
+
+To fly a real autopilot's code instead, `make sitl` starts ArduCopter SITL in Docker,
+`make sitl-gw` carries its telemetry into S2 as DRN-0001, and `make sitl-fly` flies a
+short sortie; see [tools/sitl](tools/sitl/README.md).
 
 For the bench side, `make can-dry` runs a simulated DroneCAN gimbal rig through the CAN
 gateway and prints what it would publish; `make can-run` publishes it live.

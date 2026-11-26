@@ -16,7 +16,10 @@ go build -o mavlink-gateway ./cmd/mavlink-gateway
 ./mavlink-gateway -vehicles 1=DRN-0001 -dry-run              # print instead of publishing
 ```
 
-Send MAVLink to UDP 14550 on the gateway host. For ArduPilot SITL: `--out udp:127.0.0.1:14550`.
+Send MAVLink to UDP 14550 on the gateway host. For ArduPilot SITL, `make sitl` runs one
+in Docker already pointed here ([tools/sitl](../../tools/sitl/README.md)). The gateway cannot
+request streams, so the autopilot must be set to send them: on ArduPilot 4.7, `MAV1_*`
+for SERIAL0 (`SR0_*` on older firmware).
 
 ## Options
 
