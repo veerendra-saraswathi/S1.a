@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bufio"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -98,9 +99,14 @@ func TestFlushBuildsContractMessage(t *testing.T) {
 	if again := a.Flush(now); len(again) != 0 {
 		t.Errorf("a second flush with no new frames published %d messages", len(again))
 	}
+	// The same frame again carries the same sample time: held, not published twice
+	// with one ts, until MaxHold says something is wrong with the clock.
 	feed(t, a, now, "attitude_v2")
-	if next := a.Flush(now); len(next) != 1 || next[0].Message.Seq != 2 || next[0].Message.Position != nil {
-		t.Errorf("flush after one attitude frame = %+v", next)
+	if held := a.Flush(now); len(held) != 0 {
+		t.Errorf("a repeated sample time was published at once: %+v", held)
+	}
+	if next := a.Flush(now.Add(MaxHold)); len(next) != 1 || next[0].Message.Seq != 2 || next[0].Message.Position != nil {
+		t.Errorf("flush after MaxHold = %+v", next)
 	}
 }
 
@@ -163,5 +169,87 @@ func TestUntimedFramesAreStampedOnArrival(t *testing.T) {
 	feed(t, a, arrival, "heartbeat_v2", "sys_status_v2")
 	if m := a.Flush(arrival.Add(time.Second))[0].Message; m.Metrics["clock_source"] != "gateway" || m.TS != "2026-11-20T08:00:00.250Z" {
 		t.Errorf("message = %+v; want the arrival time, not the flush time", m)
+	}
+}
+
+// frame builds a decoded-payload frame for system 1 directly, for tests that need
+// particular boot times rather than the golden ones.
+func frame(id uint32, payload []byte) mavlink.Frame {
+	return mavlink.Frame{Version: 2, SysID: 1, CompID: 1, MsgID: id, Payload: payload}
+}
+
+func attitude(bootMs uint32) mavlink.Frame {
+	p := make([]byte, 28)
+	binary.LittleEndian.PutUint32(p, bootMs)
+	return frame(mavlink.MsgAttitude, p)
+}
+
+func systemTime(utc time.Time, bootMs uint32) mavlink.Frame {
+	p := make([]byte, 12)
+	binary.LittleEndian.PutUint64(p, uint64(utc.UnixMicro()))
+	binary.LittleEndian.PutUint32(p[8:], bootMs)
+	return frame(mavlink.MsgSystemTime, p)
+}
+
+func heartbeat() mavlink.Frame {
+	p := make([]byte, 9)
+	p[4], p[5], p[7] = 2, 3, 4 // quadrotor, ArduPilot, ACTIVE
+	return frame(mavlink.MsgHeartbeat, p)
+}
+
+// A vehicle whose clock runs 1.5 s behind the gateway's, as SITL's does on a busy host.
+func behind(t *testing.T) (*Aggregator, time.Time) {
+	t.Helper()
+	a := NewAggregator(Config{TenantID: tenant, ObjectType: "CommercialDrone"})
+	arrival := time.Date(2026, 11, 26, 15, 20, 0, 0, time.UTC)
+	a.Apply(systemTime(arrival.Add(-1500*time.Millisecond), 60_000), arrival)
+	a.Apply(attitude(60_000), arrival)
+	if out := a.Flush(arrival); len(out) != 1 || out[0].Message.TS != "2026-11-26T15:19:58.500Z" {
+		t.Fatalf("first message = %+v", out)
+	}
+	return a, arrival
+}
+
+func TestAnUntimedMessageIsStampedOnTheVehicleClock(t *testing.T) {
+	a, arrival := behind(t)
+	a.Apply(heartbeat(), arrival.Add(100*time.Millisecond))
+	out := a.Flush(arrival.Add(100 * time.Millisecond))
+	if len(out) != 1 {
+		t.Fatalf("got %d messages", len(out))
+	}
+	// Arrival 15:20:00.100 on a vehicle 1.5 s behind: 15:19:58.600, not 15:20:00.100,
+	// which would put a heartbeat 1.5 s ahead of the attitude samples around it.
+	if m := out[0].Message; m.TS != "2026-11-26T15:19:58.600Z" || m.Metrics["clock_source"] != "gateway" {
+		t.Errorf("message = %+v", m)
+	}
+}
+
+func TestTwoSamplesFromOneLoopBecomeOneMessage(t *testing.T) {
+	a, arrival := behind(t)
+	a.Apply(attitude(60_000), arrival.Add(100*time.Millisecond)) // the same loop's sample, late
+	if out := a.Flush(arrival.Add(100 * time.Millisecond)); len(out) != 0 {
+		t.Fatalf("a second message with the first one's ts: %+v", out)
+	}
+	a.Apply(attitude(60_100), arrival.Add(200*time.Millisecond))
+	out := a.Flush(arrival.Add(200 * time.Millisecond))
+	if len(out) != 1 || out[0].Message.TS != "2026-11-26T15:19:58.600Z" || out[0].Message.Seq != 2 {
+		t.Fatalf("after the next sample = %+v", out)
+	}
+}
+
+func TestReanchoringOnGNSSMayStepBack(t *testing.T) {
+	a := NewAggregator(Config{TenantID: tenant, ObjectType: "CommercialDrone"})
+	arrival := time.Date(2026, 11, 26, 15, 20, 0, 0, time.UTC)
+	a.Apply(attitude(60_000), arrival) // no SYSTEM_TIME yet: estimated, on arrival
+	if out := a.Flush(arrival); len(out) != 1 || out[0].Message.Metrics["clock_source"] != "estimated" {
+		t.Fatalf("first = %+v", out)
+	}
+	// SYSTEM_TIME arrives: the vehicle's own clock is 1.5 s behind the estimate.
+	next := arrival.Add(100 * time.Millisecond)
+	a.Apply(systemTime(next.Add(-1500*time.Millisecond), 60_100), next)
+	a.Apply(attitude(60_100), next)
+	out := a.Flush(next)
+	if len(out) != 1 || out[0].Message.Metrics["clock_source"] != "gnss" || out[0].Message.TS != "2026-11-26T15:19:58.600Z" {
+		t.Fatalf("the correction was held or mis-stamped: %+v", out)
 	}
 }

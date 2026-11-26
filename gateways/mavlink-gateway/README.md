@@ -93,7 +93,7 @@ GLOBAL_POSITION_INT, from their `time_boot_ms`) was taken on the vehicle, in UTC
 |---|---|---|
 | `gnss` | SYSTEM_TIME pairs the autopilot's UTC, normally from its GNSS receiver, with `time_boot_ms`. Refreshed on each one; trusted for 5 s after the last | The autopilot's own UTC, to 1 ms |
 | `estimated` | No usable SYSTEM_TIME (none sent, or UTC 0 before a fix). The boot epoch is the minimum of arrival minus `time_boot_ms` over a 10 s window, which strips link jitter and follows crystal drift | Spacing between samples exact; absolute time on the gateway's clock, early by the shortest link delay |
-| `gateway` | The message holds no timed sample (heartbeats, battery) | The gateway's arrival time |
+| `gateway` | The message holds no timed sample (heartbeats, battery) | The gateway's arrival time, moved onto the vehicle's clock by `clock_offset_ms` while a SYSTEM_TIME anchor is trusted |
 
 `clock_offset_ms` is the vehicle's UTC minus the gateway's arrival time, from the latest
 SYSTEM_TIME: the clock skew between vehicle and ground, plus the one-way link delay.
@@ -101,6 +101,18 @@ A `time_boot_ms` that steps back by more than a second is a reboot; the vehicle'
 starts over, and the 30-second log line counts reboots per system id.
 
 The gateway never sends, so it cannot run MAVLink TIMESYNC.
+
+**One vehicle's `ts` only moves forward.** Two messages with one `ts` would be merged by
+storage, which keys a reading on its time, and an arrival-stamped message among
+vehicle-stamped ones would sit ahead of them by the clock offset. So the untimed message
+is stamped on the vehicle's clock, and a message whose `ts` does not pass the last one
+published is held and merged into the next interval. ArduPilot stamps ATTITUDE and
+GLOBAL_POSITION_INT from one loop with the same `time_boot_ms`, and when the pair falls
+either side of a publish tick this is what keeps them one message. The exceptions: a move
+between the vehicle's clock and the gateway's (the first SYSTEM_TIME, or one going stale)
+is a correction and may step back, and nothing is held longer than a second. ArduCopter
+SITL on a busy host found both faults: 15 of 381 messages shared a `ts`, and heartbeats
+landed 1.7 s ahead of the samples around them.
 
 MAVLink arrives at tens of messages per second. The gateway keeps the latest value of each metric and publishes one message per vehicle per interval, containing only what changed since the last one. Values the autopilot marks as "not measured" are left out, as is a 0,0 position from a receiver with no fix. Heartbeats from ground stations, gimbals and companion computers are ignored.
 

@@ -55,7 +55,16 @@ type vehicle struct {
 	sampleBoot  uint32
 	lastArrival time.Time
 	reboots     uint64
+
+	// The last published ts, to the millisecond the contract carries, and whether it
+	// was on the vehicle's clock (gnss) or the gateway's (estimated, or bare arrival).
+	lastTS     time.Time
+	lastOnGNSS bool
+	heldSince  time.Time
 }
+
+// MaxHold is the longest a message is held back for not advancing ts.
+const MaxHold = time.Second
 
 // Aggregator is safe for concurrent use.
 type Aggregator struct {
@@ -163,15 +172,37 @@ func (a *Aggregator) Flush(now time.Time) []Outbound {
 		if len(v.metrics) == 0 && v.position == nil {
 			continue
 		}
-		v.seq++
 		ts, source := v.lastArrival, clock.Gateway
+		offset, haveOffset := v.clock.Offset(now)
+		onGNSS := false
 		if v.sampled {
 			if utc, s, ok := v.clock.At(v.sampleBoot, now); ok {
-				ts, source = utc, s
+				ts, source, onGNSS = utc, s, s == clock.GNSS
+			}
+		} else if haveOffset {
+			// Nothing timed: stamp the arrival, but on the vehicle's clock, so one
+			// vehicle's series stays on one timescale. The source still says gateway.
+			ts, onGNSS = v.lastArrival.Add(offset), true
+		}
+		ts = ts.Truncate(time.Millisecond)
+
+		// One vehicle's ts only moves forward on a timescale. A message that does not
+		// advance it, such as two samples ArduPilot stamped in the same loop that
+		// fell either side of a tick, waits and is merged into the next. Moving from
+		// one timescale to the other is a correction, and may step back.
+		if !v.lastTS.IsZero() && onGNSS == v.lastOnGNSS && !ts.After(v.lastTS) {
+			if v.heldSince.IsZero() {
+				v.heldSince = now
+			}
+			if now.Sub(v.heldSince) < MaxHold {
+				continue
 			}
 		}
+		v.heldSince, v.lastTS, v.lastOnGNSS = time.Time{}, ts, onGNSS
+
+		v.seq++
 		v.metrics["clock_source"] = string(source)
-		if offset, ok := v.clock.Offset(now); ok {
+		if haveOffset {
 			v.metrics["clock_offset_ms"] = math.Round(float64(offset.Microseconds())/100) / 10
 		}
 		out = append(out, Outbound{
