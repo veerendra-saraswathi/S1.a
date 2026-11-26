@@ -104,7 +104,7 @@ their object types, link types and actions defined and are waiting on the module
 
 | Component | Path | State |
 |---|---|---|
-| MAVLink gateway | `gateways/mavlink-gateway` | Built. Stamps telemetry with source time, names its clock source and measures vehicle clock skew; run at 10 Hz end to end into TimescaleDB. Parser tested against pymavlink; output validated against S2's contract code; MQTT tested against a broker, including reconnect |
+| MAVLink gateway | `gateways/mavlink-gateway` | Built. Reads UDP, TCP or a serial port (raw mode, read-only, reconnecting). Stamps telemetry with source time, names its clock source and measures vehicle clock skew; run at 10 Hz end to end into TimescaleDB. Parser tested against pymavlink; output validated against S2's contract code; MQTT tested against a broker, including reconnect |
 | Drone engineering ontology | `ontologies/drone-engineering` | 6 object types, 9 link types and 7 actions. Version 0.4.0, whose gate checks the run a step names, applied to a live S2 engine |
 | HILS bench connector | `connectors` | Built. Bench report contract v1, and a report written into a live engine end to end |
 | Build provenance connector | `connectors` | Built. Build record contract v1, and a record written into a live engine end to end |

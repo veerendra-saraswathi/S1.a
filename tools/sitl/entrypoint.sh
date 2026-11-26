@@ -9,7 +9,8 @@
 #   SPEEDUP       simulation speed; 1 is real time, which source timestamps need
 #
 # SERIAL0 is the telemetry link to the gateway, which only listens. SERIAL1 (TCP 5762)
-# is the control link: tools/sitl/fly.py commands the vehicle there. The EEPROM is
+# is the control link: tools/sitl/fly.py commands the vehicle there. SERIAL2 (TCP 5763)
+# streams the same telemetry to a gateway that connects with -input tcp:. The EEPROM is
 # wiped on every start, so each run begins from the same parameters.
 set -eu
 
@@ -22,7 +23,7 @@ if [ -z "$addr" ]; then
     echo "cannot resolve GATEWAY_HOST=$host to an IPv4 address" >&2
     exit 1
 fi
-echo "telemetry: SERIAL0 -> udp $addr:$port ($host); control: SERIAL1 on tcp 5762"
+echo "telemetry: SERIAL0 -> udp $addr:$port ($host), SERIAL2 on tcp 5763; control: SERIAL1 on tcp 5762"
 
 exec /sitl/arducopter \
     --model + \
@@ -32,4 +33,5 @@ exec /sitl/arducopter \
     --defaults /sitl/copter.parm,/sitl/streams.parm \
     --serial0 "udpclient:$addr:$port" \
     --serial1 tcp:5762 \
+    --serial2 tcp:5763 \
     --wipe

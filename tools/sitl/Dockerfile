@@ -25,6 +25,7 @@ RUN chmod 0755 /sitl/arducopter /sitl/entrypoint.sh \
 
 USER sitl
 WORKDIR /var/lib/sitl
-# SERIAL1: the control port the flight script connects to. SERIAL0 goes to the gateway.
-EXPOSE 5762
+# SERIAL1: the control port the flight script connects to. SERIAL2: a second telemetry
+# port, for the gateway's TCP input. SERIAL0 sends to the gateway over UDP.
+EXPOSE 5762 5763
 ENTRYPOINT ["/sitl/entrypoint.sh"]

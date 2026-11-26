@@ -1,12 +1,14 @@
 # mavlink-gateway
 
-Listens for MAVLink on UDP and republishes it over MQTT in the S2 telemetry contract.
+Reads MAVLink from UDP, a TCP connection or a serial device and republishes it over
+MQTT in the S2 telemetry contract.
 
 ```
-MAVLink (UDP) -> mavlink-gateway -> MQTT -> S2 mqtt-bridge -> Kafka -> TimescaleDB
+MAVLink (UDP, TCP, serial) -> mavlink-gateway -> MQTT -> S2 mqtt-bridge -> Kafka -> TimescaleDB
 ```
 
-It only listens. It never sends MAVLink, so it cannot command a vehicle. It has no dependencies outside the Go standard library and builds to a single static binary.
+It only listens. It never sends MAVLink, so it cannot command a vehicle: a serial device
+is opened read-only, and nothing is written to a TCP connection. It has no dependencies outside the Go standard library and builds to a single static binary.
 
 ## Run
 
@@ -14,6 +16,9 @@ It only listens. It never sends MAVLink, so it cannot command a vehicle. It has 
 go build -o mavlink-gateway ./cmd/mavlink-gateway
 ./mavlink-gateway -vehicles 1=DRN-0001,2=DRN-0002            # publish to mqtt://localhost:1883
 ./mavlink-gateway -vehicles 1=DRN-0001 -dry-run              # print instead of publishing
+./mavlink-gateway -input serial:/dev/cu.usbmodem01 -vehicles 1=DRN-0001 -rate-hz 10
+./mavlink-gateway -input serial:/dev/ttyUSB0:57600 -vehicles 1=DRN-0001   # a SiK radio
+./mavlink-gateway -input tcp:127.0.0.1:5763 -vehicles 1=DRN-0001          # SITL, MAVProxy
 ```
 
 Send MAVLink to UDP 14550 on the gateway host. For ArduPilot SITL, `make sitl` runs one
@@ -21,11 +26,29 @@ in Docker already pointed here ([tools/sitl](../../tools/sitl/README.md)). The g
 request streams, so the autopilot must be set to send them: on ArduPilot 4.7, `MAV1_*`
 for SERIAL0 (`SR0_*` on older firmware).
 
+### A flight controller on USB or a radio
+
+`-input serial:<device>[:<baud>]` reads a serial port directly: a flight controller's USB
+port (`/dev/cu.usbmodem*` on macOS, `/dev/ttyACM*` on Linux) or a telemetry radio
+(`/dev/cu.usbserial-*`, `/dev/ttyUSB*`). The port is put in raw mode, 8N1 with no flow
+control. The baud rate defaults to 115200; USB ignores it, SiK radios default to 57600.
+On Linux the user needs to be in the `dialout` group (`uucp` on some distributions).
+
+The gateway cannot ask for streams, so set the port's stream rates once, with a ground
+station, and they persist in the autopilot. On ArduPilot 4.7 that is `MAVn_POSITION`,
+`MAVn_EXTRA1` and `MAVn_EXTRA2` at 10 and `MAVn_EXT_STAT` and `MAVn_EXTRA3` at 2, where
+`n` counts MAVLink ports in order: USB is `MAV1`. A ground station connected to the
+same port at the same time is not possible; a serial device has one reader.
+
+A TCP or serial link that closes, or a device that is unplugged, is reopened every 2
+seconds. A failure is logged once, and the link counts as connected only when bytes arrive.
+
 ## Options
 
 | Flag | Environment | Default | Meaning |
 |---|---|---|---|
-| `-listen` | `GATEWAY_LISTEN` | `:14550` | UDP address for MAVLink |
+| `-input` | `GATEWAY_INPUT` | `udp:` and `-listen` | `udp:<addr>`, `tcp:<host:port>` or `serial:<device>[:<baud>]` |
+| `-listen` | `GATEWAY_LISTEN` | `:14550` | UDP address for MAVLink, when `-input` is not given |
 | `-mqtt` | `S2_MQTT_URL` | `mqtt://localhost:1883` | Broker; `mqtts://` and `user:pass@` are supported |
 | `-tenant` | `S2_TENANT` | S2's local dev tenant | Tenant UUID in the topic |
 | `-object-type` | `GATEWAY_OBJECT_TYPE` | `CommercialDrone` | S2 object type |
@@ -88,7 +111,10 @@ MAVLink arrives at tens of messages per second. The gateway keeps the latest val
 - **QoS 0 only.** A reading published while the broker is down is lost. The gateway retries the connection every 2 seconds.
 - **Seven messages are decoded.** Frames with any other message id are skipped by length, without checksum verification.
 - **Signed MAVLink 2 frames are accepted but the signature is not verified.**
-- **UDP only.** The parser handles byte streams, but serial and TCP inputs are not wired up.
+- **Serial input has been run against a pseudo-terminal carrying SITL's output, not yet a
+  flight controller.** Raw mode is tested on macOS: every byte value passes unchanged and
+  nothing echoes. The Linux code builds and vets but its tests have not been run on Linux.
+- **One link per gateway.** Run a second gateway, with its own `-client-id`, for a second link.
 - **Benchmarked to 100 vehicles at 10 Hz** on a laptop: 9% of one core and 13 MB, every frame received ([benchmarks](../../docs/benchmarks.md)). The receive path costs 367 ns a frame. Higher counts and rates have not been run.
 
 ## Adding a message

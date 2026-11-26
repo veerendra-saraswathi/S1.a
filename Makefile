@@ -95,7 +95,7 @@ sitl-image:  ## build the ArduCopter SITL image (downloads the pinned stable bin
 	docker build -t $(SITL_IMAGE) tools/sitl
 
 sitl: sitl-image  ## start ArduCopter SITL in Docker, streaming MAVLink to UDP 14550 on this host
-	docker run -d --rm --name s1a-sitl -p 127.0.0.1:5762:5762 -e SYSID=$(SITL_SYSID) $(SITL_IMAGE)
+	docker run -d --rm --name s1a-sitl -p 127.0.0.1:5762:5762 -p 127.0.0.1:5763:5763 -e SYSID=$(SITL_SYSID) $(SITL_IMAGE)
 	@echo "SITL up. Next: make sitl-gw (publish to S2), then make sitl-fly. Stop: make sitl-stop"
 
 sitl-gw: build  ## the gateway for SITL at 10 Hz, publishing as SITL_VEHICLE (default DRN-0001)

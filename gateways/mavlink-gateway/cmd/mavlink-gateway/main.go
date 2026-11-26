@@ -1,8 +1,9 @@
-// mavlink-gateway listens for MAVLink on UDP and republishes it over MQTT in the
-// S2 telemetry contract. Point an autopilot, SITL or a telemetry radio's UDP
-// output at it; S2's mqtt-bridge picks the messages up from the broker.
+// mavlink-gateway reads MAVLink from UDP, a TCP connection or a serial device and
+// republishes it over MQTT in the S2 telemetry contract. Point an autopilot, SITL
+// or a telemetry radio at it, or plug a flight controller's USB port in; S2's
+// mqtt-bridge picks the messages up from the broker.
 //
-//	MAVLink (UDP) -> mavlink-gateway -> MQTT -> S2 mqtt-bridge -> Kafka -> TimescaleDB
+//	MAVLink (UDP, TCP, serial) -> mavlink-gateway -> MQTT -> S2 mqtt-bridge -> Kafka -> TimescaleDB
 //
 // This is the soft real-time path. Nothing in a flight-control or bench control
 // loop should wait on it.
@@ -14,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -27,6 +29,7 @@ import (
 	"time"
 
 	"github.com/veerendra-saraswathi/S1.a/gateways/internal/mqtt"
+	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/input"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/mavlink"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/telemetry"
 )
@@ -44,7 +47,9 @@ func env(name, fallback string) string {
 }
 
 func main() {
-	listen := flag.String("listen", env("GATEWAY_LISTEN", ":14550"), "UDP address to receive MAVLink on")
+	listen := flag.String("listen", env("GATEWAY_LISTEN", ":14550"), "UDP address to receive MAVLink on (shorthand for -input udp:<addr>)")
+	inputSpec := flag.String("input", env("GATEWAY_INPUT", ""),
+		"link to read MAVLink from: udp:<addr>, tcp:<host:port> or serial:<device>[:<baud>] (overrides -listen)")
 	mqttURL := flag.String("mqtt", env("S2_MQTT_URL", "mqtt://localhost:1883"), "MQTT broker URL")
 	tenant := flag.String("tenant", env("S2_TENANT", "00000000-0000-0000-0000-000000000001"),
 		"S2 tenant UUID (the default is S2's local dev tenant)")
@@ -69,6 +74,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("-vehicles: %v", err)
 	}
+	if *inputSpec == "" {
+		*inputSpec = "udp:" + *listen
+	}
+	src, err := input.Parse(*inputSpec)
+	if err != nil {
+		log.Fatalf("-input: %v", err)
+	}
 
 	var client *mqtt.Client
 	if !*dryRun {
@@ -78,40 +90,24 @@ func main() {
 		defer client.Close()
 	}
 
-	conn, err := net.ListenPacket("udp", *listen)
-	if err != nil {
-		log.Fatalf("listen: %v", err)
+	// A UDP port that cannot be bound is a configuration error. A device or server
+	// that is not there yet is normal on a bench: the receive loop keeps trying.
+	var first input.Link
+	if src.Datagram() {
+		if first, err = src.Open(); err != nil {
+			log.Fatalf("listen: %v", err)
+		}
 	}
-	log.Printf("listening for MAVLink on udp %s, publishing at %g Hz (%s)", conn.LocalAddr(), *rateHz, target(*dryRun, *mqttURL))
+	log.Printf("reading MAVLink from %s, publishing at %g Hz (%s)", src, *rateHz, target(*dryRun, *mqttURL))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go func() { <-ctx.Done(); conn.Close() }()
 
 	agg := telemetry.NewAggregator(telemetry.Config{TenantID: strings.ToLower(*tenant), ObjectType: *objectType, Vehicles: vehicleMap})
 	var stats atomic.Pointer[mavlink.Stats]
 	stats.Store(&mavlink.Stats{})
 
-	go func() { // receive loop: the only goroutine that touches the parser
-		var parser mavlink.Parser
-		buf := make([]byte, 65535)
-		for {
-			n, _, err := conn.ReadFrom(buf)
-			arrival := time.Now()
-			if err != nil {
-				if !errors.Is(err, net.ErrClosed) {
-					log.Printf("udp read: %v", err)
-				}
-				return
-			}
-			parser.Reset() // a datagram holds whole frames; never join two datagrams
-			for _, frame := range parser.Write(buf[:n]) {
-				agg.Apply(frame, arrival)
-			}
-			snapshot := parser.Stats
-			stats.Store(&snapshot)
-		}
-	}()
+	go receive(ctx, src, first, agg, &stats)
 
 	publish := time.NewTicker(time.Duration(float64(time.Second) / *rateHz))
 	defer publish.Stop()
@@ -158,6 +154,103 @@ func main() {
 			s := stats.Load()
 			log.Printf("mavlink frames=%d bad_crc=%d undecoded=%d dropped=%d garbage_bytes=%d | mqtt published=%d failed=%d%s",
 				s.Frames, s.BadCRC, s.Unknown, s.Dropped, s.Garbage, published, failed, reboots(agg))
+		}
+	}
+}
+
+// retryInterval is how long the receive loop waits before reopening a stream link.
+var retryInterval = 2 * time.Second // shortened by tests
+
+// receive reads the link until ctx ends, reopening a TCP or serial link that fails
+// or closes. It is the only goroutine that touches the parser.
+//
+// A link counts as connected once bytes arrive, not when it opens: a port proxy,
+// such as Docker's, accepts and at once closes connections while nothing is
+// behind it. Every reopen waits retryInterval, and a failure is logged when it
+// first happens, not on every retry.
+func receive(ctx context.Context, src input.Spec, link input.Link, agg *telemetry.Aggregator, stats *atomic.Pointer[mavlink.Stats]) {
+	var parser mavlink.Parser
+	var lastErr string
+	fail := func(err error) {
+		if msg := err.Error(); msg != lastErr {
+			log.Printf("%s: %v; retrying every %s", src, err, retryInterval)
+			lastErr = msg
+		}
+	}
+	for ctx.Err() == nil {
+		if link == nil {
+			var err error
+			if link, err = src.Open(); err != nil {
+				fail(err)
+				wait(ctx, retryInterval)
+				continue
+			}
+		}
+		stopClose := context.AfterFunc(ctx, func() { link.Close() })
+		parser.Reset() // a new link never continues a frame from the last one
+		received, err := readLink(link, src.Datagram(), &parser, agg, stats, func() {
+			if !src.Datagram() {
+				log.Printf("receiving from %s", src)
+			}
+			lastErr = ""
+		})
+		stopClose()
+		link.Close()
+		link = nil
+		if ctx.Err() != nil {
+			return
+		}
+		if src.Datagram() { // a UDP socket fails only if something is badly wrong
+			log.Printf("udp read: %v", err)
+			return
+		}
+		if received == 0 {
+			fail(fmt.Errorf("%v before sending anything", err))
+		} else {
+			log.Printf("lost %s after %d bytes: %v", src, received, err)
+		}
+		wait(ctx, retryInterval)
+	}
+}
+
+func wait(ctx context.Context, d time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
+}
+
+// readLink feeds the parser until the link returns an error. It calls first when
+// the first bytes arrive, and returns how many bytes it read and the error.
+func readLink(link input.Link, datagram bool, parser *mavlink.Parser, agg *telemetry.Aggregator,
+	stats *atomic.Pointer[mavlink.Stats], first func()) (int, error) {
+	buf := make([]byte, 65535)
+	received := 0
+	for {
+		n, err := link.Read(buf)
+		arrival := time.Now()
+		if n > 0 {
+			if received == 0 {
+				first()
+			}
+			received += n
+			if datagram {
+				parser.Reset() // a datagram holds whole frames; never join two datagrams
+			}
+			for _, frame := range parser.Write(buf[:n]) {
+				agg.Apply(frame, arrival)
+			}
+			snapshot := parser.Stats
+			stats.Store(&snapshot)
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return received, errors.New("closed by the other end")
+			}
+			if errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrClosed) {
+				return received, errors.New("closed")
+			}
+			return received, err
 		}
 	}
 }
