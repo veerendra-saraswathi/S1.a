@@ -17,9 +17,13 @@ the build passed simulation and not the bench.
 It needs S2's core-fleet pack and demo drones (`make seed` in the S2 repo) and uses the
 dev realm's users: `admin` defines and writes objects, `operator` requests actions.
 It also needs S2's OPA to be serving `policies/s2/actions/build_gate.rego`, which
-`make install-policy` copies into an S2 checkout. Running it again resets the example:
-objects are replaced, the build is advanced afresh, links are no-ops, the anomaly is
-kept, and the approval request is not duplicated.
+`make install-policy` copies into an S2 checkout.
+
+Running it again changes nothing it has already done. Objects are created once; after
+that only their descriptive properties are refreshed, never the fields an action owns
+(a build's status, a run's verdict), so a build is not dragged back through the gate the
+way a replacing PUT would drag it. An action whose step is already taken is skipped, the
+anomaly is kept, and the approval request is not duplicated.
 """
 
 from __future__ import annotations
@@ -37,7 +41,8 @@ import yaml
 PACK = Path(__file__).resolve().parents[2] / "ontologies" / "drone-engineering" / "pack.yaml"
 DRONE = "DRN-0001"  # created by S2's seed-demo
 
-# (object type, primary key, properties). A PUT replaces the whole object.
+# (object type, primary key, properties): the values an object is created with. Fields an
+# action owns (see governed_fields) are written only at creation.
 OBJECTS: list[tuple[str, str, dict[str, Any]]] = [
     ("EngineeringDocument", "DOC-SYSRS-001", {
         "title": "System requirements, night navigation", "kind": "SYSRS", "revision": "B",
@@ -144,12 +149,34 @@ ACTIONS: list[tuple[str, dict[str, Any]]] = [
 ]
 
 
+# The gate's order, for deciding whether a build already stands at or past a step.
+GATE = ["BUILT", "SIM_PASSED", "BENCH_PASSED", "CLEARED_FOR_FLIGHT"]
+
+# Sent with If-None-Match: * so an existing object is not replaced; S2 answers 409.
+CREATE = "PUT-IF-ABSENT"
+
+
+def governed_fields(pack: dict[str, Any]) -> dict[str, set[str]]:
+    """Per object type, the properties an action of the pack modifies: only actions set them."""
+    owned: dict[str, set[str]] = {}
+    for action in pack.get("action_types", []):
+        for edit in action.get("edits", []):
+            if edit.get("op") == "modify_object":
+                owned.setdefault(edit["object_type"], set()).update(edit.get("assign", {}))
+    return owned
+
+
 def plan() -> list[tuple[str, str, str, dict[str, Any]]]:
     """Every request as (user, method, path, body), in the order it is sent."""
-    steps: list[tuple[str, str, str, dict[str, Any]]] = [
-        ("admin", "POST", "/v1/ontology/packs:apply", yaml.safe_load(PACK.read_text())),
-    ]
-    steps += [("admin", "PUT", f"/v1/objects/{kind}/{key}", {"properties": props}) for kind, key, props in OBJECTS]
+    pack = yaml.safe_load(PACK.read_text())
+    owned = governed_fields(pack)
+    steps: list[tuple[str, str, str, dict[str, Any]]] = [("admin", "POST", "/v1/ontology/packs:apply", pack)]
+    for kind, key, props in OBJECTS:
+        path = f"/v1/objects/{kind}/{key}"
+        steps.append(("admin", CREATE, path, {"properties": props}))
+        descriptive = {k: v for k, v in props.items() if k not in owned.get(kind, set())}
+        if descriptive:
+            steps.append(("admin", "PATCH", path, {"properties": descriptive}))
     steps += [
         ("admin", "POST", f"/v1/objects/{kind}/{key}/links/{link}", {"target_primary_key": target})
         for kind, key, link, target in LINKS
@@ -194,6 +221,28 @@ def fetch_token(token_url: str, client_id: str, user: str, attempts: int = 5) ->
     sys.exit(f"could not get a token for '{user}' from {token_url}: {last}")
 
 
+def already_done(client: httpx.Client, headers: dict[str, str], action: str, params: dict[str, Any]) -> str | None:
+    """Why an action's step needs no doing on a re-run, or None to send it."""
+    def get(path: str) -> dict[str, Any] | None:
+        response = client.get(path, headers=headers)
+        return response.json()["properties"] if response.status_code == 200 else None
+
+    if action == "advanceBuild":
+        build = get(f"/v1/objects/SoftwareBuild/{params['buildId']}")
+        status = (build or {}).get("status")
+        if status == "REJECTED" or (status in GATE and GATE.index(status) >= GATE.index(params["stage"])):
+            return f"{params['buildId']} already stands at {status}"
+    if action == "recordTestVerdict":
+        run = get(f"/v1/objects/TestRun/{params['testRunId']}")
+        if run and run.get("status") == "COMPLETED" and run.get("verdict") == params["verdict"]:
+            return f"{params['testRunId']} already holds verdict {params['verdict']}"
+    if action == "attributeAnomaly":
+        anomaly = get(f"/v1/objects/Anomaly/{params['anomalyId']}")
+        if anomaly and anomaly.get("rootCause") == params["rootCause"]:
+            return f"{params['anomalyId']} is already attributed"
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--api", default="http://localhost:8000", help="S2 ontology engine base URL")
@@ -218,6 +267,22 @@ def main() -> None:
                 tokens[user] = fetch_token(args.token_url, args.client_id, user)
             headers = {"Authorization": f"Bearer {tokens[user]}"}
             action = path.split("/")[3] if path.startswith("/v1/actions/") else ""
+            if action:
+                if "admin" not in tokens:
+                    tokens["admin"] = fetch_token(args.token_url, args.client_id, "admin")
+                reason = already_done(client, {"Authorization": f"Bearer {tokens['admin']}"}, action, body["parameters"])
+                if reason:
+                    print(f"skip {method} {path}  {reason}")
+                    continue
+            if method == CREATE:
+                response = client.put(path, json=body, headers={**headers, "If-None-Match": "*"})
+                if response.status_code == 409:
+                    print(f"409 PUT {path}  exists; not replaced")
+                    continue
+                if response.status_code >= 400:
+                    sys.exit(f"PUT {path} -> {response.status_code}\n{response.text}")
+                print(f"{response.status_code} PUT {path}  created")
+                continue
             if action in APPROVAL_SUBJECT:
                 subject = body["parameters"][APPROVAL_SUBJECT[action]]
                 headers["Idempotency-Key"] = f"seed-chain:{action}:{subject}"
@@ -249,7 +314,7 @@ def main() -> None:
     print(
         "\nSeeded. One request waits in S2's Approvals queue for `approver` to decide:\n"
         "  baselineDocument  DOC-SYSRS-001 rev B   approve it, the review is done\n"
-        "BLD-FC-2026.11.3 stands at SIM_PASSED, and its flight clearance was refused: the HILS run failed.\n"
+        "BLD-FC-2026.11.3 stands at SIM_PASSED or later, and its flight clearance was refused: the HILS run failed.\n"
         "Try:  GET /v1/objects/Requirement/SYS-NAV-012/links/verifiedBy"
     )
 
