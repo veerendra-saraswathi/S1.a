@@ -144,13 +144,15 @@ def stored_rows(psql: list[str], prefix: str, since: str) -> dict[tuple[str, str
     return rows
 
 
-CONTAINERS = ["s2-mqtt", "s2-mqtt-bridge", "s2-kafka", "s2-timeseries-sink", "s2-timescaledb"]
+CONTAINERS = ["s2-mqtt", "s2-mqtt-bridge", "s2-kafka", "s2-timeseries-sink", "s2-timeseries-sink-2", "s2-timescaledb"]
 
 
 def sample_containers(samples: dict[str, list[float]], stop: threading.Event) -> None:
     while not stop.is_set():
-        out = subprocess.run(
-            ["docker", "stats", "--no-stream", "--format", "{{.Name}} {{.CPUPerc}}", *CONTAINERS],
+        up = set(subprocess.run(["docker", "ps", "--format", "{{.Names}}"], check=False,
+                                capture_output=True, text=True).stdout.split())
+        out = subprocess.run(  # only the ones running: docker stats refuses the lot if one is missing
+            ["docker", "stats", "--no-stream", "--format", "{{.Name}} {{.CPUPerc}}", *(c for c in CONTAINERS if c in up)],
             check=False, capture_output=True, text=True,
         ).stdout
         for line in out.splitlines():
@@ -309,7 +311,9 @@ def table(results: list[dict]) -> str:
             f"| {lat['bridge_to_kafka'][50]} / {lat['bridge_to_kafka'][95]} ms "
             f"| {lat['kafka_to_stored'][50]} / {lat['kafka_to_stored'][95]} ms "
             f"| **{lat['total'][50]} / {lat['total'][95]} / {lat['total'][99]} ms** "
-            f"| {cpu['mqtt-bridge']}% / {cpu['timeseries-sink']}% / {cpu['timescaledb']}% "
+            f"| {cpu['mqtt-bridge']}% / {cpu['timeseries-sink']}%"
+            f"{' + ' + str(cpu['timeseries-sink-2']) + '%' if cpu.get('timeseries-sink-2') is not None else ''}"
+            f" / {cpu['timescaledb']}% "
             f"| {clock['before']:+} → {clock['after']:+} ms{moved} |"
         )
     return "\n".join(lines)

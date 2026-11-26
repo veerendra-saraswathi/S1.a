@@ -14,6 +14,7 @@
 #   make seed        apply the ontology pack and load the worked example
 #   make gate        walk a build through the gate, from record to bench pass
 #   make bench       end-to-end latency per hop at increasing load (needs S2 up)
+#   make soak        one load for an hour, judged a minute at a time (DRONES=100 MINUTES=60)
 #   make sitl        ArduCopter SITL streaming to the gateway; make sitl-gw, make sitl-fly
 #
 # `make help` lists everything.
@@ -64,7 +65,7 @@ REPORT   ?= $(CONNECTORS)/examples/TR-HILS-0058.json
 RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-gateway test-gateway-linux test-connectors check-contract test-policy install-policy build build-can run run-dry \
+.PHONY: help soak test test-gateway test-gateway-linux test-connectors check-contract test-policy install-policy build build-can run run-dry \
         sim sitl-image sitl sitl-gw sitl-fly sitl-stop sitl-fleet sitl-fleet-gw sitl-fleet-fly sitl-fleet-stop pipeline pipeline-dry can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
         golden lint fmt clean
 
@@ -168,6 +169,11 @@ can-run: build-can  ## the simulated bench in real time, published to the S2 bro
 
 bench: build  ## end-to-end latency per hop, 3 to 50 simulated drones (STEPS=3,10,50; needs S2 up, a quiet machine)
 	uv run tools/bench/bench.py --steps $(STEPS) --seconds 20
+
+soak: DRONES = 100
+soak: MINUTES = 60
+soak: build  ## DRONES simulated drones for MINUTES (default 100, 60), judged per minute (needs S2 up, a quiet machine)
+	uv run tools/bench/soak.py --drones $(DRONES) --minutes $(MINUTES)
 
 bench-go:  ## the gateways' receive-path benchmarks
 	cd $(GATEWAYS) && go test -run '^$$' -bench . -benchmem ./mavlink-gateway/internal/telemetry ./can-gateway/internal/bus
