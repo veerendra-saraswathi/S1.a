@@ -93,7 +93,7 @@ write, and what it is still waiting for.
 | **M1** GNSS-denied night navigation | Flight datasets, position estimates, flight trial results | Position and attitude reach S2 through the gateway; `TestRun` of kind `FLIGHT` models a trial | Datasets and trained models are not modelled; nothing runs on the Jetson yet |
 | **M2** HILS anomaly detection | Verdicts, anomaly windows, root-cause attributions | All three, through the bench connector: `recordTestVerdict`, `raiseAnomaly` carrying `detectedAt` and `durationS`, and `attributeAnomaly` | A bench that writes `s2.bench-report/v1`; a PTP clock across bench subsystems for sub-millisecond alignment |
 | **M3** Generated aviation documents | Requirements and documents with traceability | `Requirement` and `EngineeringDocument` across the SYSRS, IRS, MOM, SRS, SDD, ICD, STP and STR kinds, and `baselineDocument` — proposable by an agent, approved by a person | A generator that writes the documents and requests the baseline |
-| **M4** Offline agentic engineering platform | Source, builds, unit and SITL test reports | Everything but the source, through the build connector: `SoftwareBuild` with its commit and artifact digest, `implements` links, and unit and SITL runs closed with verdicts | A pipeline that emits `s2.build-record/v1`; S2's offline install path is untested |
+| **M4** Offline agentic engineering platform | Source, builds, unit and SITL test reports | Everything but the source, through the build connector: `SoftwareBuild` with its commit and artifact digest, `implements` links, and unit and SITL runs closed with verdicts. S1.a's own pipeline emits `s2.build-record/v1` for the gateway, judged against a requirement | The pipeline of the flight software itself; S2's offline install path is untested |
 | **M5** Multi-drone GIS simulator | Simulated missions and telemetry | Simulated telemetry enters on the same contract as an aircraft, which `tools/mavlink-sim` demonstrates; `TestRun` of kind `SIMULATION` | Scenarios and GIS terrain are not modelled |
 | **M6** Actuator visual twin | Fault classifications | The `Anomaly` fault taxonomy is M6's — reduced gain, binding, frequency shift, increased damping, timing drift — with `VISUAL_TWIN` as a detector | Commanded and measured actuator position reach S2 through the CAN gateway, side by side on the actuator's `Subsystem` | A twin that writes classifications; a run of the CAN gateway on a real rig |
 
@@ -111,6 +111,7 @@ their object types, link types and actions defined and are waiting on the module
 | Build gate | `policies`, `connectors` | Built. `advanceBuild` and its policy; both connectors ask for the step a passed run earns. The policy sees the run a step names (S2's `policy_context`) and refuses one that is missing, failed, of another build or the wrong kind. Tested under OPA, against a stubbed engine and on a live engine |
 | Worked example | `tools/seed-chain` | Runs end to end against a live engine at pack 0.4.0, and is safe to re-run |
 | MAVLink simulator | `tools/mavlink-sim` | Built |
+| Pipeline | `tools/pipeline`, `.github/workflows` | Built. Builds the gateway, runs its tests, flies SITL through that binary and writes `s2.build-record/v1` with the binary's digest; `make pipeline` submits it and the gate advances the build. The workflow runs SITL without S2 and has not yet run on GitHub |
 | ArduCopter SITL | `tools/sitl` | Built. ArduPilot's stable SITL in Docker, pinned by digest, streaming to the gateway; a scripted sortie (take off, a 100 m square, RTL) flown end to end into TimescaleDB |
 | CAN gateway | `gateways/can-gateway` | Built. Reads `candump -L`; DroneCAN NodeStatus, ESC status and actuator status and commands, multi-frame transfers CRC-checked. Decoder tested against the dronecan package; a simulated bench run end to end into TimescaleDB. Not yet run on a real bus |
 | CAN bench simulator | `tools/can-sim` | Built. A gimbal rig with injectable actuator faults |
@@ -126,6 +127,7 @@ their object types, link types and actions defined and are waiting on the module
 | A bench fault reaches S2 | A simulated gimbal rig through the CAN gateway into TimescaleDB at 10 Hz: a binding fault raised the pitch tracking error from 0.014 to 0.073 rad and the gimbal's health to WARNING |
 | Telemetry latency, end to end | Benchmarked from 3 to 100 simulated drones at 10 Hz, timed at every hop, on a quiet host: nothing lost after the broker. S2's sink was found to add up to 1 s and to fall behind at 100 drones, and was changed in S2 (0.1 s batch wait, one `unnest` insert per batch). Total p95 is now 146, 175, 246 and 293 ms at 3, 10, 50 and 100 drones, against a 500 ms target |
 | A real autopilot's telemetry reaches S2 | ArduCopter stable SITL flew a 175 s sortie through the gateway at 10 Hz: 1,745 messages and 1,816 positions in TimescaleDB, no gap after streams started, 1,671 messages on the autopilot's GNSS clock. Vehicle sample to stored row p95 196 ms once the simulator's −460 ms clock offset is added back |
+| A real build earns its gate | `make pipeline` on BLD-GW-65acf4b500b5: the gateway built to a digest that a second build reproduced, 42 Go tests passed, and a SITL sortie through that binary met SW-TLM-001 (10.01 Hz, longest gap 200 ms, 1,567 published, delivered and stored, none sharing a timestamp, p95 186 ms). The record was submitted and the gate moved the build to `SIM_PASSED` on its SITL run. Earlier runs failed honestly: a sortie that never took off, and on a loaded host, merged timestamps, which led to the gateway fix |
 | Telemetry carries source time | Three simulated drones with clocks 250, 500 and 750 ms ahead, at 10 Hz into TimescaleDB: stored at vehicle time, offsets measured to 0.1 ms, none out of order |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
 | The worked example runs end to end | At pack 0.4.0: 27 requests against a live engine; the build advanced to `SIM_PASSED` through the gate, the document baseline held for a second person, and flight clearance refused in the policy's words |
@@ -178,7 +180,12 @@ make seed
 make run
 make submit-bench
 make gate
+make pipeline
 ```
+
+`make pipeline` builds the gateway, flies ArduCopter SITL through it and submits the
+build record, so the build reaches `SIM_PASSED` only if the flight met requirement
+SW-TLM-001 (seeded by `make seed`). `make pipeline-dry` does the same without S2.
 
 `make seed` first copies the build gate's policy into the S2 checkout it expects beside
 this one (`S2_DIR=../S2`), where S2's OPA picks it up. `make gate` then walks build

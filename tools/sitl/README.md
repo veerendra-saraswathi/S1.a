@@ -50,6 +50,13 @@ and `SPEEDUP`; keep `SPEEDUP=1`, since source timestamps are only meaningful in 
   ignored and only heartbeats arrive.
 - **SITL's `udpclient:` takes an IPv4 address.** Given a hostname it logs the connection
   and sends nothing, so the entrypoint resolves `host.docker.internal` first.
+- **ArduCopter may accept arming before its EKF has a position**, then refuse the GUIDED
+  takeoff and disarm itself 10 s later. `fly.py` waits for a 3D fix and the EKF's
+  absolute horizontal position, then switches to GUIDED and arms.
+- **SITL keeps real time only on a quiet host.** On a loaded Mac it fell to 98% of real
+  time: the clock offset sank half a second in 30 s and the rate dropped to 9.3 Hz.
+  `tools/pipeline` measures this from the offset's drift and calls such a run
+  INCONCLUSIVE rather than FAIL.
 - **In GUIDED, a position setpoint cancels a takeoff.** ArduCopter's position controller
   will not lift a landed vehicle, so `fly.py` watches the climb and only then steers.
 - **Docker accepts TCP connections on a published port while SITL is down**, and closes

@@ -72,11 +72,26 @@ class Vehicle:
         p = list(params) + [0.0] * (7 - len(params))
         self.m.mav.command_long_send(self.m.target_system, self.m.target_component, cmd, 0, *p)
         end = time.monotonic() + timeout
+        self.refusal = "no answer"
         while time.monotonic() < end:
-            ack = self.m.recv_match(type="COMMAND_ACK", blocking=True, timeout=0.5)
-            if ack is not None and ack.command == cmd:
-                return ack.result == MAV.MAV_RESULT_ACCEPTED
+            msg = self.m.recv_match(type=["COMMAND_ACK", "STATUSTEXT"], blocking=True, timeout=0.5)
+            if msg is None:
+                continue
+            if msg.get_type() == "STATUSTEXT":
+                self.refusal = msg.text  # ArduPilot says why it refuses here, not in the ACK
+            elif msg.command == cmd:
+                if msg.result != MAV.MAV_RESULT_ACCEPTED and self.refusal == "no answer":
+                    self.refusal = mavutil.mavlink.enums["MAV_RESULT"][msg.result].name
+                return msg.result == MAV.MAV_RESULT_ACCEPTED
         return False
+
+    def take_off(self, alt: float, attempts: int = 3) -> None:
+        for i in range(attempts):
+            if self.command(MAV.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, alt):
+                return
+            log(f"takeoff refused ({self.refusal}); attempt {i + 1} of {attempts}")
+            time.sleep(1)
+        sys.exit(f"takeoff refused: {self.refusal}")
 
     def set_mode(self, name: str) -> None:
         mode_id = self.m.mode_mapping()[name]
@@ -98,6 +113,23 @@ class Vehicle:
             if self.position()[2] >= alt * 0.95:
                 return
         sys.exit(f"did not reach {alt:g} m in {timeout:g} s")
+
+    def wait_position(self, timeout: float) -> None:
+        # ArduCopter can accept arming before its EKF has an absolute position, and then
+        # refuse a GUIDED takeoff; armed and idle, it disarms itself 10 s later.
+        end = time.monotonic() + timeout
+        fix = ekf = False
+        while time.monotonic() < end and not (fix and ekf):
+            msg = self.m.recv_match(type=["GPS_RAW_INT", "EKF_STATUS_REPORT"], blocking=True, timeout=2)
+            if msg is None:
+                continue
+            if msg.get_type() == "GPS_RAW_INT":
+                fix = msg.fix_type >= 3
+            else:
+                ekf = bool(msg.flags & MAV.EKF_POS_HORIZ_ABS) and not msg.flags & MAV.EKF_CONST_POS_MODE
+        if not (fix and ekf):
+            sys.exit(f"no 3D fix and EKF position after {timeout:g} s (fix={fix}, ekf={ekf})")
+        log("3D fix, EKF has an absolute position")
 
     def arm_when_ready(self, timeout: float) -> None:
         end = time.monotonic() + timeout
@@ -149,11 +181,11 @@ def main() -> None:
 
     v = Vehicle(args.connect)
     v.require_simulator()
-    v.set_mode("GUIDED")
+    v.wait_position(args.arm_timeout)
+    v.set_mode("GUIDED")  # GUIDED needs a position, so only now
     v.arm_when_ready(args.arm_timeout)
     home_lat, home_lon, _ = v.position()
-    if not v.command(MAV.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, args.alt):
-        sys.exit("takeoff refused")
+    v.take_off(args.alt)
     log(f"taking off to {args.alt:g} m")
     v.climb_to(args.alt)
     log(f"at {args.alt:g} m")

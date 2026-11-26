@@ -1,0 +1,43 @@
+# S1.a's own pipeline: build the MAVLink gateway, run its tests, fly ArduCopter SITL
+# through the binary it built, and keep the s2.build-record/v1 that says what happened.
+#
+# A hosted runner cannot reach an S2 stack, so SITL runs with --sitl dry: the gateway
+# prints instead of publishing and the run is judged on that output. Storage and latency
+# are judged by `make pipeline` beside a running S2, which also submits the record.
+# The record from here is an artifact of the run; submit it with
+#   make submit-build RECORD=<downloaded record.json>
+name: pipeline
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: gateways/go.mod
+      - uses: astral-sh/setup-uv@v10
+
+      - name: Gateway tests on Linux
+        run: make test-gateway
+
+      - name: Build, test, fly SITL, write the record
+        run: uv run tools/pipeline/pipeline.py --sitl dry
+
+      - name: Keep the record and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-record-${{ github.sha }}
+          path: bin/pipeline/
+          if-no-files-found: warn
+          retention-days: 90

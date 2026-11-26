@@ -57,6 +57,15 @@ OBJECTS: list[tuple[str, str, dict[str, Any]]] = [
         "statement": "The localisation service shall publish a fused geodetic position at 10 Hz or faster.",
         "verificationMethod": "TEST",
     }),
+    # The requirement S1.a's own pipeline verifies (tools/pipeline). DRAFT: written here,
+    # not yet approved by anyone.
+    ("Requirement", "SW-TLM-001", {
+        "title": "Gateway telemetry rate and latency", "level": "SOFTWARE", "status": "DRAFT",
+        "statement": "The MAVLink gateway shall carry each vehicle's telemetry into S2 at 10 Hz,"
+                     " stamped with the vehicle's time, with no message lost after the broker and"
+                     " vehicle sample to stored row within 500 ms at the 95th percentile.",
+        "verificationMethod": "TEST",
+    }),
     ("SoftwareBuild", "BLD-FC-2026.11.3", {
         "name": "Flight software 2026.11.3", "target": "FLIGHT", "gitCommit": "9be03d7",
         "artifactDigest": "sha256:" + "0" * 64, "builtAt": "2026-11-17T09:30:00Z", "status": "BUILT",

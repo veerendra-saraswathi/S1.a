@@ -48,7 +48,7 @@ RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
 .PHONY: help test test-gateway test-gateway-linux test-connectors test-policy install-policy build build-can run run-dry \
-        sim sitl-image sitl sitl-gw sitl-fly sitl-stop can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
+        sim sitl-image sitl sitl-gw sitl-fly sitl-stop pipeline pipeline-dry can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
         golden lint fmt clean
 
 help:  ## list the targets
@@ -99,7 +99,7 @@ sitl-image:  ## build the ArduCopter SITL image (downloads the pinned stable bin
 	docker build -t $(SITL_IMAGE) tools/sitl
 
 sitl: sitl-image  ## start ArduCopter SITL in Docker, streaming MAVLink to UDP 14550 on this host
-	docker run -d --rm --name s1a-sitl -p 127.0.0.1:5762:5762 -p 127.0.0.1:5763:5763 -e SYSID=$(SITL_SYSID) $(SITL_IMAGE)
+	docker run -d --rm --name s1a-sitl --add-host=host.docker.internal:host-gateway -p 127.0.0.1:5762:5762 -p 127.0.0.1:5763:5763 -e SYSID=$(SITL_SYSID) $(SITL_IMAGE)
 	@echo "SITL up. Next: make sitl-gw (publish to S2), then make sitl-fly. Stop: make sitl-stop"
 
 sitl-gw: build  ## the gateway for SITL at 10 Hz, publishing as SITL_VEHICLE (default DRN-0001)
@@ -107,6 +107,12 @@ sitl-gw: build  ## the gateway for SITL at 10 Hz, publishing as SITL_VEHICLE (de
 
 sitl-fly:  ## fly the SITL copter: take off, a 100 m square, RTL
 	uv run tools/sitl/fly.py
+
+pipeline:  ## build the gateway, test it, fly it through SITL into S2, and submit the build record
+	uv run tools/pipeline/pipeline.py --submit
+
+pipeline-dry:  ## the same without S2 or submitting: SITL judged on the gateway's printed output
+	uv run tools/pipeline/pipeline.py --sitl dry
 
 sitl-stop:  ## stop the SITL container
 	-docker rm -f s1a-sitl
