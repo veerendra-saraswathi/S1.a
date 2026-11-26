@@ -136,8 +136,42 @@ re-reads the clock around every step. Swap use also grew
 during the run, from 5.6 to 9.6 GB of 10 GB, but the load stayed at 4-5, so the host was
 not thrashing the way it was on 2026-11-20.
 
+### One hour at 100 drones (2026-11-27, `make soak`)
+
+`tools/bench/soak.py`: 100 simulated drones at 10 Hz for 60 minutes through the gateway over
+TLS into S2, settled and judged a minute at a time. S2 as of `ccd07a8`: the strict telemetry
+contract v1, `s2.telemetry.raw` on 4 partitions, two sinks in one group, both databases
+under an init. Chrome was quit; Docker Desktop's Kubernetes was left running (about 20% of a
+CPU). Swap was in use throughout, 1.4 to 9.8 GB of the host's swap file.
+
+| Minutes | Delivered by the broker | Stored | p95 per minute | Host load (1 min) |
+|---|---|---|---|---|
+| 1-60 | 3,511,364 | 3,511,364 | 175 ms to 62.9 s | 2.8 to 71.9 |
+| 30-60 | 1,856,704 | 1,856,704, each in its own minute | **175 to 270 ms** (p99 at most 627 ms) | 2.8 to 10.3 |
+
+**Verdict: INCONCLUSIVE.** Nothing was lost and nothing reached the dead-letter topic: every
+message the broker delivered was stored, 151,708 of them later than their minute. Memory was
+flat (the gateway 13.0 to 13.4 MB over the last half hour), and the sinks had drained by the
+end. The timing failed: 18 minutes, all in the first half hour (2-4 and 11-29), had p95
+between 1.7 and 62.9 s. In each of those minutes the host's load stood between 5.5 and 72
+and swap swung by gigabytes, and every hop slowed at once, gateway → broker included, which
+runs on the host and not in S2: the host stalled, and S2 caught up after each stall. The
+harness calls that INCONCLUSIVE, not FAIL.
+
+**What it shows.** Thirty consecutive minutes at 100 drones, twice the reference's load per
+node, met the 500 ms target in every minute, with TLS on and nothing lost. A long run also
+proved what a 20 s step cannot: a backlog of 60,000 messages, built in a stall, was stored
+within minutes with nothing lost or duplicated, and TimescaleDB, which crash-restarted twice
+in the 5-minute smoke test before the init fix, did not restart once at load 72. It does not
+show the hour inside the target: that needs a host that does not stall.
+
+A 5-minute smoke test the same night, at load 28 to 105 with Chrome running, fell 116,000
+messages behind and drained afterwards at about 300 messages a second, far below the 22,600
+rows a second of the quiet A/B. One sink against two on a quiet host is still to be
+compared.
+
 ### Not established
 
 The operator screen; the CAN gateway end to end under load; a degraded link; anything
-past 100 drones; sustained load longer than 20 s; and these numbers on the dedicated test
+past 100 drones; an hour inside the target, since the soak's host stalled in its first half hour; and these numbers on the dedicated test
 hardware the reference calls for (§4.10) rather than a 16 GB laptop.

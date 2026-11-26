@@ -131,6 +131,7 @@ their object types, link types and actions defined and are waiting on the module
 | A real build earns its gate | `make pipeline` on BLD-GW-e4eee545ac21: the gateway built to a digest that a second build reproduced, 42 Go tests passed, and a SITL sortie through that binary met SW-TLM-001 (10.04 Hz, longest gap 101 ms, 1,568 published, delivered and stored, none sharing a timestamp, p95 153 ms). The record was submitted and the gate moved the build to `SIM_PASSED` on its SITL run. Earlier runs failed honestly: a sortie that never took off, and on a loaded host, merged timestamps, which led to the gateway fix |
 | The broker admits only who it should | Against S2's broker with logins and topic ACLs: a gateway over TLS with its login stored all 360 messages it sent; a wrong password, no login and an untrusted certificate were refused; 360 messages sent to another tenant's topic were dropped by the broker and none stored. The pipeline passed its storage and timestamp checks over TLS |
 | TLS costs nothing measurable | 50 and 100 drones, plain and TLS alternated twice, both with logins: gateway → broker p95 was 46–100 ms over TLS and 80–1,059 ms in plain, and every message the broker delivered was stored in all eight runs. The host was loaded (load average up to 27), and end to end p95 at 100 drones exceeded 500 ms in three of the four runs, plain and TLS alike, all of it in storage |
+| An hour at 100 drones loses nothing | `make soak`: 100 simulated drones at 10 Hz for 60 min over TLS, 4 partitions and two sinks: 3,511,364 messages delivered and stored, none to the dead-letter topic, memory flat. Minutes 30-60, 1.86 million messages, met 500 ms in every minute (p95 175-270 ms); 18 earlier minutes did not, each while the host stalled (load to 72), so the run is inconclusive on time. [Benchmarks](docs/benchmarks.md) |
 | A fleet of real autopilots stays apart | Three ArduCopter SITL copters flown at once through one gateway, one rebooted after landing: each drone at 9.7–10.0 Hz, its timestamps distinct and only forward, every position at its own home, everything the broker delivered stored, p95 170–215 ms; the rebooted copter reported BOOT and resumed with no gap over 101 ms; the gateway counted every boot of every copter |
 | Telemetry carries source time | Three simulated drones with clocks 250, 500 and 750 ms ahead, at 10 Hz into TimescaleDB: stored at vehicle time, offsets measured to 0.1 ms, none out of order |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
@@ -144,8 +145,8 @@ their object types, link types and actions defined and are waiting on the module
 | The connectors ask for the right step | Tests against a stubbed engine: a passed SITL run asks for `SIM_PASSED`, a passed HILS run for `BENCH_PASSED`, a record with any failure asks for nothing, and a refusal is reported without failing the submission |
 
 **Not verified:** a real
-flight controller (only SITL so far); sustained load (the benchmark steps are 20 s); more than
-100 drones; behaviour on a lossy link; the 500 ms target at 100 drones with TLS on a quiet host. [The technical paper](docs/technical-paper.md)
+flight controller (only SITL so far); an hour at 100 drones inside the 500 ms target (the soak's host stalled in its first half hour; the second half met it in every minute); more than
+100 drones; behaviour on a lossy link. [The technical paper](docs/technical-paper.md)
 §6 is the full table and §7 the open questions.
 
 ## Tech stack
