@@ -14,12 +14,31 @@ is opened read-only, and nothing is written to a TCP connection. It has no depen
 
 ```bash
 go build -o mavlink-gateway ./cmd/mavlink-gateway
-./mavlink-gateway -vehicles 1=DRN-0001,2=DRN-0002            # publish to mqtt://localhost:1883
 ./mavlink-gateway -vehicles 1=DRN-0001 -dry-run              # print instead of publishing
-./mavlink-gateway -input serial:/dev/cu.usbmodem01 -vehicles 1=DRN-0001 -rate-hz 10
-./mavlink-gateway -input serial:/dev/ttyUSB0:57600 -vehicles 1=DRN-0001   # a SiK radio
-./mavlink-gateway -input tcp:127.0.0.1:5763 -vehicles 1=DRN-0001          # SITL, MAVProxy
 ```
+
+S2's broker requires a login, and TLS from off its machine. `make run`, `make sitl-gw` and
+the other targets at the repository root pass the development login and CA from the S2
+checkout beside this one; by hand:
+
+```bash
+S2=../S2/deploy/docker-compose/mosquitto/secrets
+./mavlink-gateway -mqtt mqtts://localhost:8883 -mqtt-user gw-dev \
+    -mqtt-password-file $S2/gw-dev.password -mqtt-ca $S2/ca.crt -vehicles 1=DRN-0001,2=DRN-0002
+```
+
+Other links take `-input` (with the same broker flags):
+
+```bash
+./mavlink-gateway -input serial:<device> -vehicles 1=DRN-0001 -rate-hz 10   # a flight controller on USB
+./mavlink-gateway -input serial:<device>:57600 -vehicles 1=DRN-0001         # a SiK telemetry radio
+./mavlink-gateway -input tcp:127.0.0.1:5763 -vehicles 1=DRN-0001            # SITL, MAVProxy
+```
+
+`<device>` is the port the board appeared as, which macOS and Linux name when it is
+plugged in. List the candidates with `ls /dev | grep -E '^(cu\.usb|ttyACM|ttyUSB)'`: a
+flight controller on USB is `cu.usbmodem…` on macOS and `ttyACM…` on Linux, a radio
+`cu.usbserial-…` or `ttyUSB…`. Use the whole path, such as `serial:/dev/cu.usbmodem1101`.
 
 Send MAVLink to UDP 14550 on the gateway host. For ArduPilot SITL, `make sitl` runs one
 in Docker already pointed here ([tools/sitl](../../tools/sitl/README.md)). The gateway cannot
@@ -49,7 +68,10 @@ seconds. A failure is logged once, and the link counts as connected only when by
 |---|---|---|---|
 | `-input` | `GATEWAY_INPUT` | `udp:` and `-listen` | `udp:<addr>`, `tcp:<host:port>` or `serial:<device>[:<baud>]` |
 | `-listen` | `GATEWAY_LISTEN` | `:14550` | UDP address for MAVLink, when `-input` is not given |
-| `-mqtt` | `S2_MQTT_URL` | `mqtt://localhost:1883` | Broker; `mqtts://` and `user:pass@` are supported |
+| `-mqtt` | `S2_MQTT_URL` | `mqtt://localhost:1883` | Broker. S2's needs `mqtts://<host>:8883` from anywhere but its own machine |
+| `-mqtt-user` | `S2_MQTT_USERNAME` | the URL's | The broker login, such as `gw-dev` |
+| `-mqtt-password-file` | `S2_MQTT_PASSWORD_FILE` | none | File holding the password. Prefer it to `user:pass@` in the URL, which shows in `ps` and shell history |
+| `-mqtt-ca` | `S2_MQTT_CA_FILE` | the system's roots | PEM CA the `mqtts://` broker's certificate must be signed by: S2's `deploy/docker-compose/mosquitto/secrets/ca.crt` |
 | `-tenant` | `S2_TENANT` | S2's local dev tenant | Tenant UUID in the topic |
 | `-object-type` | `GATEWAY_OBJECT_TYPE` | `CommercialDrone` | S2 object type |
 | `-vehicles` | `GATEWAY_VEHICLES` | none | `1=DRN-0001,2=DRN-0002`; unmapped systems publish as `MAV-<id>` |

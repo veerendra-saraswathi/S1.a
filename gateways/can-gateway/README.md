@@ -33,7 +33,10 @@ make can-run                                                     # live, to the 
 |---|---|---|---|
 | `-input` | | `-` (stdin) | `candump -L` log to read |
 | `-iface` | | all | Only frames from this interface, e.g. `can0` |
-| `-mqtt` | `S2_MQTT_URL` | `mqtt://localhost:1883` | Broker; `mqtts://` and `user:pass@` are supported |
+| `-mqtt` | `S2_MQTT_URL` | `mqtt://localhost:1883` | Broker. S2's needs `mqtts://<host>:8883` from anywhere but its own machine |
+| `-mqtt-user` | `S2_MQTT_USERNAME` | the URL's | The broker login, such as `gw-dev` |
+| `-mqtt-password-file` | `S2_MQTT_PASSWORD_FILE` | none | File holding the password. Prefer it to `user:pass@` in the URL, which shows in `ps` and shell history |
+| `-mqtt-ca` | `S2_MQTT_CA_FILE` | the system's roots | PEM CA the `mqtts://` broker's certificate must be signed by: S2's `deploy/docker-compose/mosquitto/secrets/ca.crt` |
 | `-tenant` | `S2_TENANT` | S2's local dev tenant | Tenant UUID in the topic |
 | `-object-type` | `CAN_GATEWAY_OBJECT_TYPE` | `Subsystem` | S2 object type of the nodes |
 | `-nodes` | `CAN_GATEWAY_NODES` | none | `10=SUB-DRN1-GIMBAL,20=SUB-DRN1-ESC`; unmapped nodes publish as `CAN-<id>` |

@@ -10,11 +10,15 @@ package mqtt
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,10 +33,35 @@ const (
 	reconnectDelay = 2 * time.Second
 )
 
+// Options are how a client proves who it is and decides whom to trust.
+type Options struct {
+	// Username overrides the one in the URL.
+	Username string
+	// PasswordFile holds the password, on its first line. Preferred to a password in
+	// the URL, which would show in `ps`, shell history and any log of the command.
+	PasswordFile string
+	// CAFile is the PEM certificate authority an mqtts:// broker must be signed by.
+	// Without it the system's trusted roots are used.
+	CAFile string
+}
+
+// RegisterFlags adds -mqtt-user, -mqtt-password-file and -mqtt-ca to fs, with
+// S2_MQTT_USERNAME, S2_MQTT_PASSWORD_FILE and S2_MQTT_CA_FILE as their defaults.
+func RegisterFlags(fs *flag.FlagSet) *Options {
+	o := &Options{}
+	fs.StringVar(&o.Username, "mqtt-user", os.Getenv("S2_MQTT_USERNAME"), "MQTT username (overrides one in -mqtt)")
+	fs.StringVar(&o.PasswordFile, "mqtt-password-file", os.Getenv("S2_MQTT_PASSWORD_FILE"),
+		"file holding the MQTT password, rather than putting it in -mqtt")
+	fs.StringVar(&o.CAFile, "mqtt-ca", os.Getenv("S2_MQTT_CA_FILE"),
+		"PEM CA certificate an mqtts:// broker must be signed by (default: the system's roots)")
+	return o
+}
+
 // Client publishes to one broker and reconnects on the next Publish after a failure.
 type Client struct {
 	network   string // "tcp" or "tls"
 	addr      string
+	tls       *tls.Config
 	clientID  string
 	username  string
 	password  string
@@ -45,7 +74,8 @@ type Client struct {
 }
 
 // New accepts mqtt://host:port and mqtts://host:port, with optional user:password@.
-func New(rawURL, clientID string) (*Client, error) {
+// opts, if given, override the URL's credentials and set the CA for TLS.
+func New(rawURL, clientID string, opts ...Options) (*Client, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("mqtt url: %w", err)
@@ -74,7 +104,53 @@ func New(rawURL, clientID string) (*Client, error) {
 		c.username = u.User.Username()
 		c.password, _ = u.User.Password()
 	}
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	if o.Username != "" {
+		c.username = o.Username
+	}
+	if o.PasswordFile != "" {
+		raw, err := os.ReadFile(o.PasswordFile)
+		if err != nil {
+			return nil, fmt.Errorf("mqtt password file: %w", err)
+		}
+		c.password, _, _ = strings.Cut(string(raw), "\n")
+		c.password = strings.TrimSpace(c.password)
+		if c.password == "" {
+			return nil, fmt.Errorf("mqtt password file %s is empty", o.PasswordFile)
+		}
+	}
+	if c.password != "" && c.username == "" {
+		return nil, errors.New("mqtt: a password was given without a username")
+	}
+	if c.network == "tls" {
+		c.tls = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: u.Hostname()}
+		if o.CAFile != "" {
+			pem, err := os.ReadFile(o.CAFile)
+			if err != nil {
+				return nil, fmt.Errorf("mqtt ca: %w", err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(pem) {
+				return nil, fmt.Errorf("mqtt ca: no PEM certificate in %s", o.CAFile)
+			}
+			c.tls.RootCAs = pool
+		}
+	} else if o.CAFile != "" {
+		return nil, errors.New("mqtt: -mqtt-ca needs an mqtts:// broker; this one is plain mqtt://")
+	}
 	return c, nil
+}
+
+// connackReasons are MQTT 3.1.1's CONNACK return codes.
+var connackReasons = map[byte]string{
+	1: "it does not speak MQTT 3.1.1",
+	2: "it rejected the client id",
+	3: "the server is unavailable",
+	4: "the username or password is wrong",
+	5: "not authorised (Mosquitto's answer to a wrong username or password, too)",
 }
 
 // Publish sends one QoS 0 message, connecting first if needed.
@@ -119,7 +195,7 @@ func (c *Client) ensureConnected() error {
 	var err error
 	dialer := &net.Dialer{Timeout: dialTimeout}
 	if c.network == "tls" {
-		conn, err = tls.DialWithDialer(dialer, "tcp", c.addr, &tls.Config{MinVersion: tls.VersionTLS12})
+		conn, err = tls.DialWithDialer(dialer, "tcp", c.addr, c.tls)
 	} else {
 		conn, err = dialer.Dial("tcp", c.addr)
 	}
@@ -151,7 +227,11 @@ func (c *Client) ensureConnected() error {
 		err = fmt.Errorf("unexpected reply to CONNECT: % x", ack)
 	}
 	if err == nil && ack[3] != 0 {
-		err = fmt.Errorf("broker refused the connection, return code %d", ack[3])
+		reason, ok := connackReasons[ack[3]]
+		if !ok {
+			reason = fmt.Sprintf("return code %d", ack[3])
+		}
+		err = fmt.Errorf("broker refused the connection: %s", reason)
 	}
 	if err != nil {
 		conn.Close()

@@ -47,6 +47,7 @@ func main() {
 	input := flag.String("input", "-", "candump -L log to read; - is stdin")
 	iface := flag.String("iface", "", "only frames from this interface, e.g. can0 (default: all)")
 	mqttURL := flag.String("mqtt", env("S2_MQTT_URL", "mqtt://localhost:1883"), "MQTT broker URL")
+	mqttOpts := mqtt.RegisterFlags(flag.CommandLine)
 	tenant := flag.String("tenant", env("S2_TENANT", "00000000-0000-0000-0000-000000000001"),
 		"S2 tenant UUID (the default is S2's local dev tenant)")
 	objectType := flag.String("object-type", env("CAN_GATEWAY_OBJECT_TYPE", "Subsystem"), "S2 object type of the nodes")
@@ -89,7 +90,7 @@ func main() {
 
 	var client *mqtt.Client
 	if !*dryRun {
-		if client, err = mqtt.New(*mqttURL, *clientID); err != nil {
+		if client, err = mqtt.New(*mqttURL, *clientID, *mqttOpts); err != nil {
 			log.Fatal(err)
 		}
 		defer client.Close()

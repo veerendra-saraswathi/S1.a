@@ -121,8 +121,11 @@ def sitl_run(out: Path, artifact: Path, mode: str) -> dict:
     broker = None
     if mode == "s2":  # the broker's own copy, so loss can be placed before or after it
         with (out / "broker.out").open("w") as b:
-            broker = subprocess.Popen(["docker", "exec", "s2-mqtt", "mosquitto_sub", "-q", "0",
-                                       "-t", f"s2/v1/+/+/{DRONE}/telemetry"], stdout=b, stderr=subprocess.STDOUT)
+            # As s2-monitor, the read-only user; its password is read inside the container.
+            sub = ("mosquitto_sub -q 0 -u s2-monitor -P \"$(cat /mosquitto/secrets/s2-monitor.password)\""
+                   f" -t 's2/v1/+/+/{DRONE}/telemetry'")
+            broker = subprocess.Popen(["docker", "exec", "s2-mqtt", "sh", "-c", sub],
+                                      stdout=b, stderr=subprocess.STDOUT)
     with gw_out.open("w") as o, gw_err.open("w") as e:
         gateway = subprocess.Popen(cmd, stdout=o, stderr=e)
     try:
@@ -257,21 +260,27 @@ def measure_s2(since: datetime) -> dict:
     times = [datetime.fromtimestamp(float(r[0]), UTC) for r in rows]
     ingested = [datetime.fromtimestamp(float(r[1]), UTC) for r in rows]
     m = _rate_and_gaps(times)
-    offset_rows = psql("select extract(epoch from time) - value / 1000, value from telemetry.reading"
-                       f" where {where} and metric = 'clock_offset_ms' order by time")
-    offsets = [float(r[1]) for r in offset_rows]
-    m_speed = sitl_speed([(float(r[0]), float(r[1])) for r in offset_rows])
+    offset_rows = [(float(t), float(v)) for t, v in psql(
+        "select extract(epoch from time), value from telemetry.reading"
+        f" where {where} and metric = 'clock_offset_ms' order by time")]
+    offsets = [v for _, v in offset_rows]
+    m_speed = sitl_speed([(t - v / 1000, v) for t, v in offset_rows])  # on the gateway's clock
     gnss = psql(f"select count(*) from telemetry.reading where {where} and metric = 'clock_source'"
                 " and value_text = 'gnss'")
     m["gnss_messages"] = int(gnss[0][0])
     m["sitl_speed"] = m_speed
     if offsets and len(times) > 20:
         # ts is on the vehicle's clock; offset = vehicle minus gateway, so adding it puts
-        # the sample on the gateway's clock. One mean offset for the run: its spread is ms.
-        offset = statistics.fmean(offsets)
+        # the sample on the gateway's clock. Each message by the offset it carries: a
+        # simulator falling behind real time makes one run-wide mean wrong by seconds.
+        by_time = {round(t, 3): v for t, v in offset_rows}
         settled = times[0] + timedelta(seconds=STREAM_SETTLE_S)
-        lat = sorted((i - t).total_seconds() * 1000 + offset for t, i in zip(times, ingested) if t >= settled)
-        m["clock_offset_ms"] = round(offset, 1)
+        lat = sorted((i - t).total_seconds() * 1000 + by_time[round(t.timestamp(), 3)]
+                     for t, i in zip(times, ingested) if t >= settled and round(t.timestamp(), 3) in by_time)
+        if not lat:
+            return m
+        m["clock_offset_ms"] = round(statistics.fmean(offsets), 1)
+        m["latency_samples"] = len(lat)
         m["latency_p50_ms"] = round(lat[len(lat) // 2], 1)
         m["latency_p95_ms"] = round(lat[int(len(lat) * 0.95)], 1)
     return m

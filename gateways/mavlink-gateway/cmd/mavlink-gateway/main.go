@@ -51,6 +51,7 @@ func main() {
 	inputSpec := flag.String("input", env("GATEWAY_INPUT", ""),
 		"link to read MAVLink from: udp:<addr>, tcp:<host:port> or serial:<device>[:<baud>] (overrides -listen)")
 	mqttURL := flag.String("mqtt", env("S2_MQTT_URL", "mqtt://localhost:1883"), "MQTT broker URL")
+	mqttOpts := mqtt.RegisterFlags(flag.CommandLine)
 	tenant := flag.String("tenant", env("S2_TENANT", "00000000-0000-0000-0000-000000000001"),
 		"S2 tenant UUID (the default is S2's local dev tenant)")
 	objectType := flag.String("object-type", env("GATEWAY_OBJECT_TYPE", "CommercialDrone"), "S2 object type of the vehicles")
@@ -84,7 +85,7 @@ func main() {
 
 	var client *mqtt.Client
 	if !*dryRun {
-		if client, err = mqtt.New(*mqttURL, *clientID); err != nil {
+		if client, err = mqtt.New(*mqttURL, *clientID, *mqttOpts); err != nil {
 			log.Fatal(err)
 		}
 		defer client.Close()

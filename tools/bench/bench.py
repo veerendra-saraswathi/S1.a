@@ -49,6 +49,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import paho.mqtt.client as mqtt
 import psycopg
@@ -192,7 +193,14 @@ def run_step(args, drones: int, port: int) -> dict:
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"s1a-bench-{prefix}")
     client.on_message = recorder.on_mqtt
-    client.connect(args.mqtt_host, args.mqtt_port)
+    # The harness subscribes the way the gateway publishes: same broker, same transport.
+    broker = urlparse(args.mqtt)
+    tls = broker.scheme in ("mqtts", "ssl")
+    if args.mqtt_password_file:
+        client.username_pw_set(args.mqtt_user, Path(args.mqtt_password_file).read_text().strip())
+    if tls:
+        client.tls_set(ca_certs=args.mqtt_ca or None)
+    client.connect(broker.hostname or "localhost", broker.port or (8883 if tls else 1883))
     client.subscribe(f"s2/v1/{TENANT}/CommercialDrone/+/telemetry")
     client.loop_start()
 
@@ -313,8 +321,11 @@ def main() -> None:
     parser.add_argument("--seconds", type=int, default=20, help="length of each step")
     parser.add_argument("--rate-hz", type=int, default=10, help="gateway publish rate per drone")
     parser.add_argument("--settle", type=float, default=5, help="seconds to wait for the pipeline to drain")
-    parser.add_argument("--mqtt-host", default="localhost")
-    parser.add_argument("--mqtt-port", type=int, default=1883)
+    parser.add_argument("--mqtt", default=os.environ.get("S2_MQTT_URL", "mqtts://localhost:8883"),
+                        help="broker the gateway publishes to, and the harness subscribes on")
+    parser.add_argument("--mqtt-user", default="s2-monitor", help="read-only login for the harness")
+    parser.add_argument("--mqtt-password-file", default=os.environ.get("S2_MQTT_MONITOR_PASSWORD_FILE"))
+    parser.add_argument("--mqtt-ca", default=os.environ.get("S2_MQTT_CA_FILE"))
     parser.add_argument("--kafka", default="localhost:29092")
     parser.add_argument("--topic", default="s2.telemetry.raw")
     parser.add_argument("--psql", default="docker exec s2-timescaledb psql -U postgres -d telemetry",

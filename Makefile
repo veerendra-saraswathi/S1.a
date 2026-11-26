@@ -31,6 +31,18 @@ POLICY      := policies/s2/actions/build_gate.rego
 # An S2 checkout, for the policy S2's OPA has to serve. Override: make seed S2_DIR=~/src/S2
 S2_DIR ?= ../S2
 
+# The S2 broker requires a login and, from outside its machine, TLS. These defaults use
+# the dev certificate and passwords S2's `make up` writes into its checkout; the gateways
+# and tools read them from the environment. Override any of them, e.g. for another broker:
+#   make run S2_MQTT_URL=mqtts://broker.example:8883 S2_MQTT_PASSWORD_FILE=~/gw.password
+MQTT_SECRETS ?= $(S2_DIR)/deploy/docker-compose/mosquitto/secrets
+S2_MQTT_URL ?= mqtts://localhost:8883
+S2_MQTT_USERNAME ?= gw-dev
+S2_MQTT_PASSWORD_FILE ?= $(abspath $(MQTT_SECRETS)/gw-dev.password)
+S2_MQTT_CA_FILE ?= $(abspath $(MQTT_SECRETS)/ca.crt)
+S2_MQTT_MONITOR_PASSWORD_FILE ?= $(abspath $(MQTT_SECRETS)/s2-monitor.password)
+export S2_MQTT_URL S2_MQTT_USERNAME S2_MQTT_PASSWORD_FILE S2_MQTT_CA_FILE S2_MQTT_MONITOR_PASSWORD_FILE
+
 # Override on the command line, e.g. make sim DRONES=5
 VEHICLES ?= 1=DRN-0001,2=DRN-0002,3=DRN-0003
 DRONES   ?= 3

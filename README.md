@@ -128,6 +128,8 @@ their object types, link types and actions defined and are waiting on the module
 | Telemetry latency, end to end | Benchmarked from 3 to 100 simulated drones at 10 Hz, timed at every hop, on a quiet host: nothing lost after the broker. S2's sink was found to add up to 1 s and to fall behind at 100 drones, and was changed in S2 (0.1 s batch wait, one `unnest` insert per batch). Total p95 is now 146, 175, 246 and 293 ms at 3, 10, 50 and 100 drones, against a 500 ms target |
 | A real autopilot's telemetry reaches S2 | ArduCopter stable SITL flew a 175 s sortie through the gateway at 10 Hz: 1,745 messages and 1,816 positions in TimescaleDB, no gap after streams started, 1,671 messages on the autopilot's GNSS clock. Vehicle sample to stored row p95 196 ms once the simulator's −460 ms clock offset is added back |
 | A real build earns its gate | `make pipeline` on BLD-GW-e4eee545ac21: the gateway built to a digest that a second build reproduced, 42 Go tests passed, and a SITL sortie through that binary met SW-TLM-001 (10.04 Hz, longest gap 101 ms, 1,568 published, delivered and stored, none sharing a timestamp, p95 153 ms). The record was submitted and the gate moved the build to `SIM_PASSED` on its SITL run. Earlier runs failed honestly: a sortie that never took off, and on a loaded host, merged timestamps, which led to the gateway fix |
+| The broker admits only who it should | Against S2's broker with logins and topic ACLs: a gateway over TLS with its login stored all 360 messages it sent; a wrong password, no login and an untrusted certificate were refused; 360 messages sent to another tenant's topic were dropped by the broker and none stored. The pipeline passed its storage and timestamp checks over TLS |
+| TLS costs nothing measurable | 50 and 100 drones, plain and TLS alternated twice, both with logins: gateway → broker p95 was 46–100 ms over TLS and 80–1,059 ms in plain, and every message the broker delivered was stored in all eight runs. The host was loaded (load average up to 27), and end to end p95 at 100 drones exceeded 500 ms in three of the four runs, plain and TLS alike, all of it in storage |
 | Telemetry carries source time | Three simulated drones with clocks 250, 500 and 750 ms ahead, at 10 Hz into TimescaleDB: stored at vehicle time, offsets measured to 0.1 ms, none out of order |
 | The pack applies to a live engine | Applied to a running stack; object, link and action types registered |
 | The worked example runs end to end | At pack 0.4.0: 27 requests against a live engine; the build advanced to `SIM_PASSED` through the gate, the document baseline held for a second person, and flight clearance refused in the policy's words |
@@ -141,7 +143,7 @@ their object types, link types and actions defined and are waiting on the module
 
 **Not verified:** a real
 flight controller (only SITL so far); sustained load (the benchmark steps are 20 s); more than
-100 drones; behaviour on a lossy link; latency with TLS and broker authentication on. [The technical paper](docs/technical-paper.md)
+100 drones; behaviour on a lossy link; the 500 ms target at 100 drones with TLS on a quiet host. [The technical paper](docs/technical-paper.md)
 §6 is the full table and §7 the open questions.
 
 ## Tech stack
@@ -173,7 +175,11 @@ make sim
 
 With an S2 stack running locally (`make up` in the S2 repo; run it again after pulling S2,
 since it rebuilds the images and migrates the database, and the gate needs S2's
-`policy_context`, migration 0006):
+`policy_context`, migration 0006). S2's broker requires a login, and TLS from off its
+machine; its `make up` writes a development CA and passwords into its checkout, and every
+target here that publishes uses them, over `mqtts://localhost:8883` as `gw-dev`. Point at
+another broker with `S2_MQTT_URL`, `S2_MQTT_USERNAME`, `S2_MQTT_PASSWORD_FILE` and
+`S2_MQTT_CA_FILE`:
 
 ```bash
 make seed
