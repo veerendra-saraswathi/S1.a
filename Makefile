@@ -47,7 +47,7 @@ REPORT   ?= $(CONNECTORS)/examples/TR-HILS-0058.json
 RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-gateway test-connectors test-policy install-policy build build-can run run-dry \
+.PHONY: help test test-gateway test-gateway-linux test-connectors test-policy install-policy build build-can run run-dry \
         sim sitl-image sitl sitl-gw sitl-fly sitl-stop can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
         golden lint fmt clean
 
@@ -60,6 +60,10 @@ test: test-gateway test-connectors  ## run every test
 
 test-gateway:  ## both gateways' parser, decoder and mapping tests
 	cd $(GATEWAYS) && go test ./...
+
+test-gateway-linux:  ## the gateways' tests on Linux, in Docker (pulls golang:1.27-bookworm once, about 1.2 GB)
+	docker run --rm -v $(CURDIR)/$(GATEWAYS):/src:ro -w /src -e GOCACHE=/tmp/gocache -e GOFLAGS=-buildvcs=false \
+		golang:1.27-bookworm go test -count=1 -race ./...
 
 test-connectors:  ## the connectors' contract and mapping tests
 	cd $(CONNECTORS) && uv run --quiet pytest -q

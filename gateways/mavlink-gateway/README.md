@@ -112,8 +112,9 @@ MAVLink arrives at tens of messages per second. The gateway keeps the latest val
 - **Seven messages are decoded.** Frames with any other message id are skipped by length, without checksum verification.
 - **Signed MAVLink 2 frames are accepted but the signature is not verified.**
 - **Serial input has been run against a pseudo-terminal carrying SITL's output, not yet a
-  flight controller.** Raw mode is tested on macOS: every byte value passes unchanged and
-  nothing echoes. The Linux code builds and vets but its tests have not been run on Linux.
+  flight controller.** Raw mode is tested on macOS and on Linux (`make test-gateway-linux`,
+  in a Go container): every byte value passes unchanged and nothing echoes. Without raw
+  mode the test fails on both, on macOS by bytes held back, on Linux by 0x04 ending the read.
 - **One link per gateway.** Run a second gateway, with its own `-client-id`, for a second link.
 - **Benchmarked to 100 vehicles at 10 Hz** on a laptop: 9% of one core and 13 MB, every frame received ([benchmarks](../../docs/benchmarks.md)). The receive path costs 367 ns a frame. Higher counts and rates have not been run.
 
