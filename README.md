@@ -104,7 +104,7 @@ their object types, link types and actions defined and are waiting on the module
 
 | Component | Path | State |
 |---|---|---|
-| MAVLink gateway | `gateways/mavlink-gateway` | Built. Reads UDP, TCP or a serial port (raw mode, read-only, reconnecting). Stamps telemetry with source time, names its clock source and measures vehicle clock skew; run at 10 Hz end to end into TimescaleDB. Parser tested against pymavlink; output validated against S2's contract code; MQTT tested against a broker, including reconnect |
+| MAVLink gateway | `gateways/mavlink-gateway` | Built. Reads UDP, TCP or a serial port (raw mode, read-only, reconnecting). Stamps telemetry with source time, names its clock source and measures vehicle clock skew; run at 10 Hz end to end into TimescaleDB. Parser tested against pymavlink; output held to telemetry contract v1's schema on every test run; MQTT tested against a broker, including reconnect |
 | Drone engineering ontology | `ontologies/drone-engineering` | 6 object types, 9 link types and 7 actions. Version 0.4.0, whose gate checks the run a step names, applied to a live S2 engine |
 | HILS bench connector | `connectors` | Built. Bench report contract v1, and a report written into a live engine end to end |
 | Build provenance connector | `connectors` | Built. Build record contract v1, and a record written into a live engine end to end |
@@ -123,6 +123,7 @@ their object types, link types and actions defined and are waiting on the module
 | The parser decodes MAVLink correctly | Frames for every decoded message, encoded by pymavlink in v1 and v2, compared field by field |
 | It survives fragmentation, noise and corruption | A multi-frame stream fed one byte at a time with leading garbage; a flipped payload byte |
 | Output conforms to S2's telemetry contract | Gateway output from a simulated three-drone run passed through S2's own validator |
+| Every message the gateways publish is telemetry contract v1 | Each gateway test writes what it publishes, and every topic and payload is validated against v1's JSON Schema; a pinned copy of S2's frozen contract, compared with S2's on every push. The 21,381 messages from three SITL fleet runs also pass v1 and S2's strict bridge |
 | The CAN gateway reads DroneCAN correctly | Frames for every decoded type, encoded by the dronecan package, decoded and compared field by field; a corrupted transfer fails its CRC, a lost frame drops it |
 | A bench fault reaches S2 | A simulated gimbal rig through the CAN gateway into TimescaleDB at 10 Hz: a binding fault raised the pitch tracking error from 0.014 to 0.073 rad and the gimbal's health to WARNING |
 | Telemetry latency, end to end | Benchmarked from 3 to 100 simulated drones at 10 Hz, timed at every hop, on a quiet host: nothing lost after the broker. S2's sink was found to add up to 1 s and to fall behind at 100 drones, and was changed in S2 (0.1 s batch wait, one `unnest` insert per batch). Total p95 is now 146, 175, 246 and 293 ms at 3, 10, 50 and 100 drones, against a 500 ms target |

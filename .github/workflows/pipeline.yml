@@ -25,10 +25,24 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: gateways/go.mod
+          cache-dependency-path: gateways/go.mod  # standard library only: there is no go.sum
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0: it publishes no major tag
+      # S2's frozen telemetry contract, to hold the pinned copy to. S2's working branch:
+      # a change there that S1.a has not taken fails here, which is the point.
+      - uses: actions/checkout@v7
+        with:
+          repository: veerendra-saraswathi/S2
+          ref: phase2-action-executor
+          path: .s2
+          sparse-checkout: contracts
 
       - name: Gateway tests on Linux
         run: make test-gateway
+
+      - name: Telemetry contract v1, pinned and published
+        run: |
+          make check-contract S2_DIR=.s2
+          make test-connectors
 
       - name: Build, test, fly SITL, write the record
         run: uv run tools/pipeline/pipeline.py --sitl dry

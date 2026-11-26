@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/veerendra-saraswathi/S1.a/gateways/internal/s2/s2test"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/input"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/mavlink"
 	"github.com/veerendra-saraswathi/S1.a/gateways/mavlink-gateway/internal/telemetry"
@@ -100,6 +101,7 @@ func TestReceiveReconnectsAStreamLink(t *testing.T) {
 		t.Fatalf("stats %+v; want 4 frames and no bad CRC", *s)
 	}
 	out := agg.Flush(time.Now())
+	s2test.Record(t, out...)
 	if len(out) != 1 || out[0].Message.Position == nil {
 		t.Fatalf("flush = %+v; want one message with the position from the second connection", out)
 	}

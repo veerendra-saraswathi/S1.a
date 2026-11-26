@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/veerendra-saraswathi/S1.a/gateways/internal/s2"
+	"github.com/veerendra-saraswathi/S1.a/gateways/internal/s2/s2test"
 )
 
 const tenant = "00000000-0000-0000-0000-000000000001"
@@ -30,13 +31,16 @@ func goldenLines(t testing.TB) []string {
 	return out
 }
 
-func run(p *Pipeline, lines []string) []s2.Outbound {
+// run feeds lines through p, and hands what it published to the contract check (s2test).
+func run(t testing.TB, p *Pipeline, lines []string) []s2.Outbound {
+	t.Helper()
 	var out []s2.Outbound
 	emit := func(o s2.Outbound) { out = append(out, o) }
 	for _, l := range lines {
 		p.Line(l, emit)
 	}
 	p.Flush(emit)
+	s2test.Record(t, out...)
 	return out
 }
 
@@ -54,7 +58,7 @@ func TestGoldenCaptureBecomesContractMessages(t *testing.T) {
 		TenantID: tenant, ObjectType: "Subsystem", Interval: time.Second,
 		Nodes: map[uint8]string{10: "SUB-DRN1-GIMBAL"},
 	})
-	out := run(p, goldenLines(t))
+	out := run(t, p, goldenLines(t))
 	msgs := byKey(out)
 	if len(out) != 2 {
 		t.Fatalf("got %d messages, want 2 (gimbal node, ESC node): %+v", len(out), out)
@@ -114,7 +118,7 @@ func TestActuatorMapOverridesTheReportingNode(t *testing.T) {
 		TenantID: tenant, ObjectType: "Subsystem", Interval: time.Second,
 		Nodes: map[uint8]string{10: "SUB-DRN1-GIMBAL"}, Actuators: map[uint8]string{4: "SUB-DRN1-PAYLOAD"},
 	})
-	msgs := byKey(run(p, goldenLines(t)))
+	msgs := byKey(run(t, p, goldenLines(t)))
 	if _, ok := msgs["SUB-DRN1-PAYLOAD"].Metrics["actuator_4_position"]; !ok {
 		t.Errorf("actuator 4 should be filed under SUB-DRN1-PAYLOAD: %v", msgs)
 	}
@@ -132,7 +136,7 @@ func TestACommandBeforeAnyStatusIsCountedNotGuessed(t *testing.T) {
 		}
 	}
 	p := New(Config{TenantID: tenant, ObjectType: "Subsystem", Interval: time.Second})
-	if out := run(p, commandsOnly); len(out) != 0 {
+	if out := run(t, p, commandsOnly); len(out) != 0 {
 		t.Errorf("published %+v", out)
 	}
 	if p.Stats.Unattributed != 2 {
@@ -154,7 +158,7 @@ func TestWindowsAreCutOnCaptureTime(t *testing.T) {
 		lines = append(lines, nodeStatus(t0.Add(time.Duration(i)*100*time.Millisecond), uint32(i), i))
 	}
 	p := New(Config{TenantID: tenant, ObjectType: "Subsystem", Interval: time.Second})
-	out := run(p, lines)
+	out := run(t, p, lines)
 	if len(out) != 3 {
 		t.Fatalf("got %d messages, want 3 windows", len(out))
 	}
@@ -172,7 +176,7 @@ func TestWindowsAreCutOnCaptureTime(t *testing.T) {
 func TestAGapInTheCaptureSkipsEmptyWindows(t *testing.T) {
 	t0 := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
 	lines := []string{nodeStatus(t0, 1, 1), nodeStatus(t0.Add(5500*time.Millisecond), 6, 2)}
-	out := run(New(Config{TenantID: tenant, ObjectType: "Subsystem", Interval: time.Second}), lines)
+	out := run(t, New(Config{TenantID: tenant, ObjectType: "Subsystem", Interval: time.Second}), lines)
 	if len(out) != 2 {
 		t.Fatalf("got %d messages, want 2: empty windows publish nothing", len(out))
 	}
@@ -180,7 +184,7 @@ func TestAGapInTheCaptureSkipsEmptyWindows(t *testing.T) {
 
 func TestOtherInterfacesAndBadLinesAreCounted(t *testing.T) {
 	p := New(Config{TenantID: tenant, ObjectType: "Subsystem", Interval: time.Second, Iface: "can1"})
-	run(p, []string{
+	run(t, p, []string{
 		"(1795600000.001000) can0 1001550A#D204000055EFBEC3",
 		"not a candump line",
 		"(1795600000.002000) can1 123#R",

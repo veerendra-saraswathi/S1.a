@@ -1,5 +1,6 @@
-// Package s2 is the S2 telemetry contract v1, as every S1.a gateway publishes it
-// (S2: services/ingestion-connectors/src/s2_ingest/contracts.py).
+// Package s2 is the S2 telemetry contract v1, as every S1.a gateway publishes it. The
+// contract is frozen and pinned in contracts/telemetry/v1 at the repository root;
+// contract_test.go holds these types to it.
 //
 //	MQTT topic    s2/v1/{tenant_id}/{ObjectType}/{object_pk}/telemetry
 //	MQTT payload  {"ts": RFC 3339, "metrics": {name: number|string|bool},

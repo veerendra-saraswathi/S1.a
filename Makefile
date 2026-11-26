@@ -4,7 +4,8 @@
 # dependencies inline (PEP 723) and run under uv, so there is nothing to
 # activate. See README.md.
 #
-#   make test        parser and mapping tests
+#   make test        parser, mapping and telemetry contract tests
+#   make check-contract  the pinned telemetry contract v1 is S2's (needs an S2 checkout)
 #   make run-dry     the gateway prints what it would publish
 #   make sim         three simulated drones
 #   make can-dry     a simulated DroneCAN bench through the CAN gateway, printed
@@ -27,6 +28,7 @@ CAN_SIM     := tools/can-sim/sim.py
 CONNECTORS  := connectors
 SEED        := tools/seed-chain/seed.py
 POLICY      := policies/s2/actions/build_gate.rego
+CONTRACT    := contracts/telemetry/v1
 
 # An S2 checkout, for the policy S2's OPA has to serve. Override: make seed S2_DIR=~/src/S2
 S2_DIR ?= ../S2
@@ -62,7 +64,7 @@ REPORT   ?= $(CONNECTORS)/examples/TR-HILS-0058.json
 RECORD   ?= $(CONNECTORS)/examples/BLD-FC-2026.11.4.json
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-gateway test-gateway-linux test-connectors test-policy install-policy build build-can run run-dry \
+.PHONY: help test test-gateway test-gateway-linux test-connectors check-contract test-policy install-policy build build-can run run-dry \
         sim sitl-image sitl sitl-gw sitl-fly sitl-stop sitl-fleet sitl-fleet-gw sitl-fleet-fly sitl-fleet-stop pipeline pipeline-dry can-dry can-run can-golden bench bench-go seed seed-dry submit-bench submit-bench-dry submit-build submit-build-dry gate \
         golden lint fmt clean
 
@@ -80,8 +82,13 @@ test-gateway-linux:  ## the gateways' tests on Linux, in Docker (pulls golang:1.
 	docker run --rm -v $(CURDIR)/$(GATEWAYS):/src:ro -w /src -e GOCACHE=/tmp/gocache -e GOFLAGS=-buildvcs=false \
 		golang:1.27-bookworm go test -count=1 -race ./...
 
-test-connectors:  ## the connectors' contract and mapping tests
+test-connectors:  ## the connectors' tests, and the gateways' output against telemetry contract v1
 	cd $(CONNECTORS) && uv run --quiet pytest -q
+
+check-contract:  ## the pinned telemetry contract v1 is S2's, byte for byte (needs an S2 checkout)
+	@test -d $(S2_DIR)/$(CONTRACT) || { echo "no $(CONTRACT) in an S2 checkout at $(S2_DIR); set S2_DIR"; exit 1; }
+	@diff -r $(CONTRACT) $(S2_DIR)/$(CONTRACT) && echo "$(CONTRACT) matches $(S2_DIR)" \
+		|| { echo "the pinned contract differs from S2's: v1 is frozen, so one side is wrong (see $(CONTRACT)/README.md)"; exit 1; }
 
 test-policy:  ## the build gate's policy tests (needs opa and an S2 checkout)
 	@command -v opa >/dev/null || { echo "opa is not installed: https://www.openpolicyagent.org/docs#install"; exit 1; }
